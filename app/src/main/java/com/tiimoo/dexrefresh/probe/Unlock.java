@@ -182,6 +182,10 @@ public final class Unlock {
      */
     public static void applyPersisted(String spec) {
         if (spec == null || spec.trim().isEmpty()) {
+            if (active()) {
+                ProbeLog.post("UNLOCK persisted selection cleared");
+                configure("off");
+            }
             return;
         }
         ProbeLog.post("UNLOCK applying persisted selection from %s: %s",

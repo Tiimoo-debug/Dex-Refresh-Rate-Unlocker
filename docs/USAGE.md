@@ -132,7 +132,12 @@ su -c 'logcat -d -s DexRRReport:V'
 
 The `$(date +%s)` matters: the command channel only fires when the property
 *value changes*, so running the identical string twice does nothing the second
-time. `setprop` itself never prints anything — the answer is only in the log.
+time. The trailing timestamp is stripped before the command is parsed, so it
+never gets mistaken for an argument. `setprop` itself never prints anything —
+the answer is only in the log.
+
+`persist.dexrr.unlock` is polled, not only read at boot, so setting it takes
+effect within a couple of seconds rather than at the next reboot.
 
 ## 6. Pull the full log
 

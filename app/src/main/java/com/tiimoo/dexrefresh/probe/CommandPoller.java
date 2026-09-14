@@ -38,6 +38,7 @@ public final class CommandPoller {
 
     private static volatile boolean started;
     private static volatile String lastValue;
+    private static volatile String lastPersisted;
 
     public static synchronized void start(final ClassLoader cl) {
         if (started) {
@@ -77,14 +78,7 @@ public final class CommandPoller {
         // A selection stored in persist.dexrr.unlock survives reboots, so the
         // unlock can be a standing setting rather than something retyped after
         // every boot.
-        try {
-            Object persisted = get.invoke(null, Cfg.PROP_PERSIST_UNLOCK, "");
-            if (persisted instanceof String) {
-                Unlock.applyPersisted((String) persisted);
-            }
-        } catch (Throwable t) {
-            ProbeLog.postThrowable("persisted unlock", t);
-        }
+        // Read once here so a reboot restores the selection...
         while (true) {
             try {
                 Object raw = get.invoke(null, Cfg.PROP_CMD, "");
@@ -93,6 +87,15 @@ public final class CommandPoller {
                     lastValue = value;
                     ProbeLog.post("COMMAND '%s'", value);
                     dispatch(value);
+                }
+                // ...and poll it too, so setting it mid-session takes effect
+                // rather than silently waiting for the next boot.
+                Object persisted = get.invoke(null, Cfg.PROP_PERSIST_UNLOCK, "");
+                String persistedValue = persisted instanceof String
+                        ? ((String) persisted).trim() : "";
+                if (!persistedValue.equals(lastPersisted)) {
+                    lastPersisted = persistedValue;
+                    Unlock.applyPersisted(persistedValue);
                 }
             } catch (Throwable t) {
                 // Never let the poller die; a transient failure is not fatal.
@@ -103,7 +106,7 @@ public final class CommandPoller {
     }
 
     private static void dispatch(String value) {
-        String[] parts = value.split("\\s+");
+        String[] parts = stripCacheBuster(value.split("\\s+"));
         String verb = parts[0].toLowerCase(Locale.US);
         if ("snapshot".equals(verb)) {
             String label = parts.length > 1 ? parts[1] : "manual";
@@ -119,10 +122,17 @@ public final class CommandPoller {
             Integer requested = null;
             if (parts.length > 1) {
                 try {
-                    requested = Integer.valueOf(Integer.parseInt(parts[1]));
+                    int parsed = Integer.parseInt(parts[1]);
+                    // Display ids are small. Anything larger is not an id -
+                    // most likely a timestamp that escaped the strip above.
+                    if (parsed >= -1 && parsed <= 255) {
+                        requested = Integer.valueOf(parsed);
+                    } else {
+                        ProbeLog.post("why: '%s' is not a display id, explaining all", parts[1]);
+                    }
                 } catch (NumberFormatException e) {
-                    // "why <timestamp>" or a typo: explain everything instead of
-                    // failing, since the id is the awkward part to get right.
+                    // a typo: explain everything rather than fail, since the id
+                    // is the awkward part to get right in the first place.
                     requested = null;
                 }
             }
@@ -171,6 +181,40 @@ public final class CommandPoller {
         ProbeLog.post("unknown command '%s' (try: snapshot <label> | votes | scout"
                 + " | class <fqcn> | why [displayId]"
                 + " | unlock <display:priority,...> | unlock off)", value);
+    }
+
+    /**
+     * Drop a trailing epoch timestamp.
+     *
+     * <p>Commands only fire when the property value changes, so callers append
+     * $(date +%s) to make a repeated command take effect. That token then gets
+     * parsed as an argument - "why $(date +%s)" was read as "explain display
+     * 1789418903". Stripping it here fixes every verb at once rather than
+     * teaching each one to ignore it.
+     */
+    private static String[] stripCacheBuster(String[] parts) {
+        if (parts.length < 2) {
+            return parts;
+        }
+        String last = parts[parts.length - 1];
+        if (!looksLikeEpoch(last)) {
+            return parts;
+        }
+        String[] out = new String[parts.length - 1];
+        System.arraycopy(parts, 0, out, 0, out.length);
+        return out;
+    }
+
+    private static boolean looksLikeEpoch(String token) {
+        if (token.length() < 9 || token.length() > 13) {
+            return false;
+        }
+        for (int i = 0; i < token.length(); i++) {
+            if (!Character.isDigit(token.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Method propertyGetter(ClassLoader cl) {
