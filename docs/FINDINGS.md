@@ -707,3 +707,51 @@ DisableRefreshRateSwitchingVote]` that appears with DeX and is what `unlock
 It also disposes of the remaining doubt about the withdrawn bandwidth theory. A
 link that carries 120 Hz while mirroring carries 120 Hz while in DeX; nothing
 about the wire changed when the mode did.
+
+## Three ways a vote caps a rate, and only one was being read
+
+Chasing the render rate turned up a wider hole: `capsBelow` read
+`mMaxRefreshRate` and nothing else, so it saw exactly one of the three shapes a
+cap comes in.
+
+| shape | vote | how it caps |
+| --- | --- | --- |
+| a maximum | `PhysicalVote(min,max)`, `RenderVote(min,max)` | `mMaxRefreshRate` |
+| a whitelist of rates | `SupportedRefreshRatesVote` | `List<RefreshRates(peak,vsync)>` — the ceiling is the highest peak |
+| a whitelist of modes | `SupportedModesVote` | `List<Integer>` of mode ids — the ceiling is whatever the fastest listed mode runs at |
+
+The last two carry no maximum at all, so a check reading `mMaxRefreshRate`
+returns false for them however tightly they restrict the display. Both are now
+handled: the rate whitelist inside `Votes` (its highest peak *is* its maximum),
+the mode whitelist in `Diagnose`, because resolving mode ids to rates needs the
+display's mode list and `Votes` does not have one.
+
+A mode pin is all-or-nothing — it cannot be partially relaxed — so `auto` drops
+one only when no `auto:<hz>` ceiling was asked for. With a ceiling, honouring it
+means leaving the pin alone.
+
+### Two rendering bugs found alongside
+
+- **`nested()` was too greedy.** It returned the first non-empty `List` field
+  it found on any vote, by type, because `CombinedVote.mVotes` has no reliable
+  name under R8. But `SupportedModesVote.mModeIds` and
+  `SupportedRefreshRatesVote.mRefreshRates` are also `List` fields, so both were
+  treated as nested votes and rendered as `[Integer Integer]` and
+  `[RefreshRates RefreshRates]`. A mode pin restricting the display to 60 Hz
+  would have appeared in a report as noise. It now checks that an element
+  actually satisfies one of the interfaces the containing vote implements —
+  true of `CombinedVote`'s children, false of mode ids and rate pairs, and
+  independent of any class name R8 may have rewritten.
+- **`BaseModeRefreshRateVote` never showed its rate.** `terse` looked for
+  `mBaseModeRefreshRate`; the field is `mAppRequestBaseModeRefreshRate`. It read
+  null every time and fell through to printing the bare class name, so a vote
+  pinning the base mode to 60 Hz looked like a vote with no content.
+  `RequestedRefreshRateVote.mRefreshRate` and
+  `DisableRefreshRateSwitchingVote.mDisableRefreshRateSwitching` were unhandled
+  for the same reason.
+
+These are covered by a test that runs the real `Votes` class on a desktop JVM
+against stand-ins shaped like the framework's vote classes — same field names,
+same nesting, same interface relationship. That the stand-ins are not the
+framework's own classes is the point: the reflection cannot tell, which is the
+property that has to hold on a firmware where R8 has renamed the originals.

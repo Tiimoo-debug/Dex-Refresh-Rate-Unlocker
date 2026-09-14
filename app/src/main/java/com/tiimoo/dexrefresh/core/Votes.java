@@ -105,6 +105,16 @@ public final class Votes {
      *
      * <p>Found by type rather than by field name, since the name is gone on
      * this firmware — R8 stripped it along with the priority constants.
+     *
+     * <p>"A list field" is not enough on its own: {@code SupportedModesVote}
+     * holds a {@code List<Integer>} of mode ids and
+     * {@code SupportedRefreshRatesVote} a list of rate pairs, and treating
+     * either as nested votes rendered them as {@code [Integer Integer]} and
+     * hid what they actually pin. So the list only counts if its contents are
+     * votes — tested by asking whether an element satisfies one of the
+     * interfaces this vote itself implements, which is true of CombinedVote's
+     * children and of nothing else, without naming a class R8 may have
+     * renamed.
      */
     public static List<?> nested(Object vote) {
         if (vote == null) {
@@ -124,7 +134,8 @@ public final class Votes {
                 try {
                     f.setAccessible(true);
                     Object value = f.get(vote);
-                    if (value instanceof List && !((List<?>) value).isEmpty()) {
+                    if (value instanceof List && !((List<?>) value).isEmpty()
+                            && holdsVotes(vote, ((List<?>) value).get(0))) {
                         return (List<?>) value;
                     }
                 } catch (Throwable ignored) {
@@ -133,6 +144,21 @@ public final class Votes {
             }
         }
         return null;
+    }
+
+    /** True when {@code element} is a vote of the same family as {@code vote}. */
+    private static boolean holdsVotes(Object vote, Object element) {
+        if (element == null) {
+            return false;
+        }
+        for (Class<?> k = vote.getClass(); k != null && k != Object.class; k = k.getSuperclass()) {
+            for (Class<?> iface : k.getInterfaces()) {
+                if (iface.isInstance(element)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** True when this vote, or one nested in it, caps any rate below {@code limit}. */
@@ -171,6 +197,14 @@ public final class Votes {
                     }
                 }
                 return false;
+            }
+            // A vote can also cap by restricting which rates are allowed at
+            // all, rather than by naming a maximum. Its highest entry is the
+            // ceiling it imposes. This constrains both the scan-out rate and
+            // the render rate, so it counts under either kind.
+            float allowed = highestAllowedRate(vote);
+            if (allowed > 0f) {
+                return allowed < limit;
             }
             if (kind != null && !vote.getClass().getName().contains(kind)) {
                 return false;
@@ -227,18 +261,107 @@ public final class Votes {
             if (width != null && height != null) {
                 return kind + "(" + width + "x" + height + ")";
             }
-            Object modeIds = Reflect.get(vote, "mModeIds");
+            // The ids themselves, not "[size=2]": which modes a vote allows is
+            // the whole content of the vote, and a count says nothing.
+            List<?> modeIds = pinnedModeIds(vote);
             if (modeIds != null) {
-                return kind + Dumper.describe(modeIds, true);
+                StringBuilder sb = new StringBuilder(kind).append("(modes");
+                for (Object id : modeIds) {
+                    sb.append(' ').append(id);
+                }
+                return sb.append(')').toString();
             }
-            Object base = Reflect.get(vote, "mBaseModeRefreshRate");
-            if (base != null) {
+            List<?> allowed = allowedRates(vote);
+            if (allowed != null) {
+                StringBuilder sb = new StringBuilder(kind).append("(peaks");
+                for (Object entry : allowed) {
+                    sb.append(' ').append(rate(Reflect.get(entry, "mPeakRefreshRate")));
+                }
+                return sb.append(')').toString();
+            }
+            // The base-mode rate is filed under two different names depending
+            // on the vote; neither is "mBaseModeRefreshRate", which is what
+            // this looked for and never found.
+            Object base = Reflect.get(vote, "mAppRequestBaseModeRefreshRate");
+            if (base == null) {
+                base = Reflect.get(vote, "mRefreshRate");
+            }
+            if (base instanceof Number) {
                 return kind + "(" + rate(base) + ")";
+            }
+            Object disable = Reflect.get(vote, "mDisableRefreshRateSwitching");
+            if (disable != null) {
+                return kind + "(" + disable + ")";
             }
             return kind;
         } catch (Throwable t) {
             return "<unreadable vote>";
         }
+    }
+
+    /**
+     * The rate-pair list of a vote that whitelists rates, or null.
+     *
+     * <p>{@code SupportedRefreshRatesVote} holds {@code RefreshRates(peak,
+     * vsync)} entries. Identified by the shape of its contents rather than by
+     * class name, so R8 renaming does not hide it.
+     */
+    private static List<?> allowedRates(Object vote) {
+        for (Class<?> k = vote.getClass(); k != null && k != Object.class; k = k.getSuperclass()) {
+            Field[] fields;
+            try {
+                fields = k.getDeclaredFields();
+            } catch (Throwable t) {
+                return null;
+            }
+            for (Field f : fields) {
+                if (!List.class.isAssignableFrom(f.getType())) {
+                    continue;
+                }
+                try {
+                    f.setAccessible(true);
+                    Object value = f.get(vote);
+                    if (value instanceof List && !((List<?>) value).isEmpty()
+                            && Reflect.get(((List<?>) value).get(0), "mPeakRefreshRate") != null) {
+                        return (List<?>) value;
+                    }
+                } catch (Throwable ignored) {
+                    // unreadable; keep looking
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Highest rate a whitelisting vote permits, or 0 if it is not one. */
+    public static float highestAllowedRate(Object vote) {
+        List<?> allowed = allowedRates(vote);
+        if (allowed == null) {
+            return 0f;
+        }
+        float highest = 0f;
+        for (Object entry : allowed) {
+            Object peak = Reflect.get(entry, "mPeakRefreshRate");
+            if (peak instanceof Number) {
+                highest = Math.max(highest, ((Number) peak).floatValue());
+            }
+        }
+        return highest;
+    }
+
+    /**
+     * The mode ids a vote pins the display to, or null if it pins none.
+     *
+     * <p>A vote naming a set of modes caps the rate just as surely as one
+     * naming a maximum, but says nothing about rates itself — resolving it
+     * needs the display's mode list, which is why the caller does that part.
+     */
+    public static List<?> pinnedModeIds(Object vote) {
+        if (vote == null) {
+            return null;
+        }
+        Object ids = Reflect.get(vote, "mModeIds");
+        return ids instanceof List && !((List<?>) ids).isEmpty() ? (List<?>) ids : null;
     }
 
     /** "RefreshRateVote$RenderVote" -> "RenderVote". */

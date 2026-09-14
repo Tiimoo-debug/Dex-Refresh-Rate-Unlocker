@@ -111,6 +111,11 @@ public final class Diagnose {
             anything |= report(sb, spec, "render frame rate", displayId, modes.maxRate, false);
         }
 
+        if (reportModePins(sb, spec, displayId, modes)) {
+            looked = true;
+            anything = true;
+        }
+
         if (!looked) {
             sb.append("Content is produced as fast as the panel scans. Nothing to unlock.\n");
         } else if (!anything) {
@@ -150,6 +155,12 @@ public final class Diagnose {
             float target = ceiling > 0f ? Math.min(ceiling, modes.maxRate) : modes.maxRate;
             addBlockingPriorities(displayId, target, out);
             addBlockingPriorities(Votes.GLOBAL_ID, target, out);
+            // Only when no ceiling was asked for: a mode pin is all-or-nothing,
+            // so honouring a ceiling below the fastest mode means leaving it.
+            if (ceiling <= 0f) {
+                addModePinPriorities(displayId, modes.maxId, out);
+                addModePinPriorities(Votes.GLOBAL_ID, modes.maxId, out);
+            }
         }
         return out;
     }
@@ -165,6 +176,79 @@ public final class Diagnose {
                 out.add(Integer.valueOf(votes.keyAt(i)));
             }
         }
+    }
+
+    /**
+     * Report votes that pin the display to a set of modes excluding its fastest.
+     *
+     * <p>A vote can cap the rate without naming one, by listing the mode ids
+     * it will allow. Nothing in the vote itself says what those modes run at,
+     * so it is invisible to a check that reads maximum rates — which is what
+     * every check here did. Resolving it needs the display's mode list, which
+     * is why this lives beside the mode parsing rather than in {@code Votes}.
+     *
+     * @return true if any vote pins away the fastest mode
+     */
+    private static boolean reportModePins(StringBuilder sb, List<String> spec,
+                                          int displayId, ModeInfo modes) {
+        List<String> pins = new ArrayList<String>();
+        collectModePins(displayId, modes.maxId, pins);
+        collectModePins(Votes.GLOBAL_ID, modes.maxId, pins);
+        if (pins.isEmpty()) {
+            return false;
+        }
+        sb.append("\nvotes pinning the display away from mode ").append(modes.maxId)
+                .append(" (").append(modes.maxRate).append(" Hz):\n");
+        for (int i = 0; i < pins.size(); i++) {
+            sb.append("   ").append(pins.get(i)).append('\n');
+            String key = pins.get(i).split("\\s+")[0];
+            if (!spec.contains(key)) {
+                spec.add(key);
+            }
+        }
+        return true;
+    }
+
+    private static void addModePinPriorities(int displayId, int maxId,
+                                             java.util.Set<Integer> out) {
+        SparseArray<?> votes = Votes.forDisplay(displayId);
+        if (votes == null) {
+            return;
+        }
+        for (int i = 0; i < votes.size(); i++) {
+            List<?> ids = Votes.pinnedModeIds(votes.valueAt(i));
+            if (ids != null && !contains(ids, maxId)) {
+                out.add(Integer.valueOf(votes.keyAt(i)));
+            }
+        }
+    }
+
+    /** Add "d:p  <rendered vote>" for each vote whose mode list omits {@code maxId}. */
+    private static void collectModePins(int displayId, int maxId, List<String> out) {
+        SparseArray<?> votes = Votes.forDisplay(displayId);
+        if (votes == null) {
+            return;
+        }
+        for (int i = 0; i < votes.size(); i++) {
+            Object vote = votes.valueAt(i);
+            List<?> ids = Votes.pinnedModeIds(vote);
+            if (ids == null || contains(ids, maxId)) {
+                continue;
+            }
+            out.add(String.format(Locale.US, "%d:%d  %s%s",
+                    displayId, votes.keyAt(i), Votes.terse(vote),
+                    displayId == Votes.GLOBAL_ID
+                            ? "   <- GLOBAL, applies to every display" : ""));
+        }
+    }
+
+    private static boolean contains(List<?> ids, int wanted) {
+        for (Object id : ids) {
+            if (id instanceof Number && ((Number) id).intValue() == wanted) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

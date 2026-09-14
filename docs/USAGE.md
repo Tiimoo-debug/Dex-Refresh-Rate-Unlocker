@@ -174,6 +174,9 @@ votes limiting the panel scan rate:
 
 votes limiting the render frame rate:
    9:13  RenderVote(0.000,120.000)
+
+votes pinning the display away from mode 87 (144.0 Hz):
+   9:2   SupportedModesVote(modes 44 46)
 ```
 
 The **panel scan rate** is the display mode — what the monitor's own OSD reads
@@ -181,6 +184,13 @@ out. The **render frame rate** is how fast Android produces content into it.
 A panel scanning at 144 while content is produced at 60 is a real and common
 state, and it is what "the monitor says 144 but it looks like 60" is. Raising
 one does not raise the other; the generated `unlock` line covers both.
+
+The third section appears when a vote names the modes it will allow rather than
+a maximum rate. That caps the display just as hard, and nothing in the vote
+itself says what those modes run at — so it is invisible unless the mode list is
+consulted, which is what `why` does. `auto` drops such a pin too, but only when
+no `auto:<hz>` ceiling was given: a mode pin cannot be partially relaxed, so
+with a ceiling in force the pin is left alone.
 
 The `$(date +%s)` matters: the command channel only fires when the property
 *value changes*, so running the identical string twice does nothing the second
