@@ -37,6 +37,17 @@ public final class Cfg {
     public static final long CMD_POLL_MS = 2000L;
 
     /**
+     * Heartbeat cadence. The vote log only prints transitions, so a constraint
+     * that never moves never appears - which is exactly what hid the 60 Hz
+     * ceiling in run 1. The heartbeat prints the whole state on a timer so a
+     * constant shows up as a constant instead of as silence.
+     */
+    public static final long HEARTBEAT_MS = 10_000L;
+
+    /** Print an anchor line this often even when nothing changed. */
+    public static final long HEARTBEAT_ANCHOR_MS = 60_000L;
+
+    /**
      * Set by the hook once it is live inside system_server, so StatusActivity
      * can tell you whether the module actually loaded. Best-effort: SELinux may
      * refuse the write, in which case the status simply reads "unknown".

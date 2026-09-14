@@ -70,16 +70,30 @@ the whole table.
   called once each for displays 0, 2 and 7 in a row, and the result dedupe was
   keyed on the method alone. Every `[was ...]` on those lines was comparing one
   display against a different one. Fixed: the key now includes the arguments.
-- **Not actually a DeX comparison.** Both `dex-off` and `dex-on` commands were
-  sent back to back with no DeX session started in between, and the surrounding
-  traffic (display state 2, brightness ramping 1.37 → 1.49) is a screen-on
-  transition. So run 1 shows the mechanism, not a DeX diff.
+- **The excerpt does not contain a DeX transition** — though DeX *was* in use.
+  (An earlier version of this note wrongly said DeX was never started; it was.
+  The first invocation was without DeX, the later ones with, and DeX was toggled
+  on and off during the third.) The 26 seconds actually pasted are bracketed by
+  `requestDisplayStateInternal(0, state 2)` — display state 1 → 2, i.e. screen
+  off → on — followed by an auto-brightness ramp from 1.376 to 1.497. That is a
+  screen wake, not a dock event. `logcat -s` was following live, so what got
+  captured is whatever scrolled past during that window, and the DeX toggles
+  fell outside it.
 
-### 4. Three displays exist
+### 4. Three displays, all capped at 60, with DeX running
 
-Ids 0, 2 and 7, with base mode ids 3, 43 and 44 respectively. Displays 2 and 7
-sat at `physical (10.0 60.0)` throughout and were unaffected by the restrictor,
-which only touched display 0.
+Ids 0, 2 and 7, with base mode ids 3, 43 and 44. Displays 2 and 7 sat at
+`physical (10.0 60.0)` throughout, untouched by the restrictor, which only moved
+display 0.
+
+Since DeX was running during this capture, "every display has a 60 Hz ceiling
+that never moves" is the central observation, not an aside. A cap that is
+constant is precisely what a change-triggered log cannot show, which is why the
+excerpt contains no line explaining it.
+
+What displays 2 and 7 actually are is still unknown — the log rendered them only
+as `DisplayDevice@hash`. That is now fixed: display events resolve name,
+uniqueId, type and flags.
 
 ## Changes made for run 2
 
@@ -100,10 +114,32 @@ which only touched display 0.
 - **Per-argument result dedupe**, fixing the cross-display bug above.
 - `dex-probe.sh bigbuffer` raises the logcat ring to 64 MB.
 
+### Heartbeat, added because of this
+
+The deeper lesson from run 1 is that change-triggered logging — the thing that
+makes the vote log readable at frame rate — structurally cannot show a
+constraint that is always present. Run 2 therefore prints the whole state on a
+timer as well:
+
+```
+STATE* d0{p7=RenderVote(60,inf)} d2{} d7{} | committed=... | restrictHRR=true
+```
+
+Every 10 s when it differs, plus a forced anchor every 60 s so a constant reads
+as a constant instead of as silence. Field reads only, no locks, no binder.
+
 ## Open question for run 2
 
 Before anything else: **is the phone set to Adaptive motion smoothness, and does
-it actually run at 120 Hz outside DeX?** The ceiling was 60.0 in both halves of
-run 1. If Motion Smoothness is on Standard, everything is 60 Hz by setting and
-there is no DeX-specific cap to find in that capture. Confirm 120 Hz is live
-first, then take the two snapshots.
+it actually run at 120 Hz with DeX disconnected?** Every display showed a 60 Hz
+ceiling for the whole capture. Two explanations fit equally well so far:
+
+1. DeX caps everything to 60 — the hypothesis, and consistent with DeX being
+   active throughout.
+2. Motion smoothness is set to Standard, in which case 60 Hz is the global
+   setting and there is nothing DeX-specific in that log at all.
+
+The heartbeat distinguishes them without ambiguity: with the module running and
+DeX *disconnected*, a `STATE` line showing a 120 Hz ceiling proves (1); one
+still showing 60 proves (2). Check that before capturing the diff, because under
+(2) no amount of further instrumentation will find a DeX cap that is not there.

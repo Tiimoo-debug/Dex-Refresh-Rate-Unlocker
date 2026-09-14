@@ -7,6 +7,7 @@ import com.tiimoo.dexrefresh.core.Reflect;
 import com.tiimoo.dexrefresh.core.Throttle;
 import com.tiimoo.dexrefresh.probe.ClassScout;
 import com.tiimoo.dexrefresh.probe.CommandPoller;
+import com.tiimoo.dexrefresh.probe.Heartbeat;
 import com.tiimoo.dexrefresh.probe.ControlReceiver;
 import com.tiimoo.dexrefresh.probe.ProbeState;
 import com.tiimoo.dexrefresh.probe.Snapshots;
@@ -71,6 +72,7 @@ public final class DisplayHooks {
         // receiver nor any snapshot ever fired, so the one control path that
         // has no dependencies must not be behind any of the others.
         CommandPoller.start(cl);
+        Heartbeat.start();
         harvestVotePriorities(cl);
         captureServiceInstances(cl);
         hookBootPhase(cl);
@@ -518,6 +520,7 @@ public final class DisplayHooks {
         ProbeLog.postNow("---- end SurfaceControl inventory ----");
         HookEngine.hookMatching(cl, SURFACE_CONTROL, Cfg.HOOKABLE_METHOD, true);
         hookSamsungRestrictor(sc);
+        recordCommittedSpecs(sc);
     }
 
     /**
@@ -566,6 +569,35 @@ public final class DisplayHooks {
                         + "  [with caller stack]");
             } catch (Throwable t) {
                 ProbeLog.postNow("  restrictHighRefreshRate hook failed: " + t);
+            }
+        }
+    }
+
+    /**
+     * Remember the specs last pushed to SurfaceFlinger.
+     *
+     * <p>This is the ground truth for "what is the panel actually allowed to
+     * do", and the heartbeat prints it alongside the votes so one line answers
+     * the whole question.
+     */
+    private static void recordCommittedSpecs(Class<?> surfaceControl) {
+        for (Method m : Reflect.methodsNamed(surfaceControl, "setDesiredDisplayModeSpecs")) {
+            try {
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            if (param.args != null && param.args.length > 1) {
+                                ProbeState.record("committed",
+                                        Dumper.describe(param.args[param.args.length - 1], true));
+                            }
+                        } catch (Throwable t) {
+                            HookEngine.reportOnce("committed", t);
+                        }
+                    }
+                });
+            } catch (Throwable ignored) {
+                // already hooked for logging; recording is a bonus
             }
         }
     }
@@ -643,7 +675,8 @@ public final class DisplayHooks {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         try {
-                            ProbeLog.post("DISPLAY-EVENT %s(%s)", name, describeAll(param.args));
+                            ProbeLog.post("DISPLAY-EVENT %s(%s)%s", name,
+                                    describeAll(param.args), identifyDevices(param.args));
                             Snapshots.requestDeferred("display-event:" + name);
                         } catch (Throwable t) {
                             HookEngine.reportOnce("lifecycle:" + name, t);
@@ -676,6 +709,52 @@ public final class DisplayHooks {
         for (String name : classes) {
             HookEngine.hookMatching(cl, name, Cfg.HOOKABLE_METHOD, true);
         }
+    }
+
+    /**
+     * Name/uniqueId/type for any DisplayDevice among the arguments.
+     *
+     * <p>"DisplayDevice@3f2a1b" tells us nothing; which physical or virtual
+     * display DeX just added tells us a lot. Field reads only - calling
+     * getDisplayDeviceInfoLocked() here would take the display lock from inside
+     * a hook that is already under it.
+     */
+    private static String identifyDevices(Object[] args) {
+        if (args == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Object a : args) {
+            if (a == null || !a.getClass().getName().contains("DisplayDevice")) {
+                continue;
+            }
+            Object info = Reflect.get(a, "mCurrentDisplayDeviceInfo");
+            if (info == null) {
+                info = Reflect.get(a, "mDisplayDeviceInfo");
+            }
+            String name = info != null ? String.valueOf(Reflect.get(info, "name")) : null;
+            Object uniqueId = Reflect.get(a, "mUniqueId");
+            sb.append("  [device");
+            if (name != null) {
+                sb.append(" name=").append(name);
+            }
+            if (uniqueId != null) {
+                sb.append(" uniqueId=").append(uniqueId);
+            }
+            if (info != null) {
+                Object type = Reflect.get(info, "type");
+                Object flags = Reflect.get(info, "flags");
+                if (type != null) {
+                    sb.append(" type=").append(type);
+                }
+                if (flags != null) {
+                    sb.append(" flags=0x").append(Integer.toHexString(
+                            flags instanceof Integer ? (Integer) flags : 0));
+                }
+            }
+            sb.append(']');
+        }
+        return sb.toString();
     }
 
     static String describeAll(Object[] args) {

@@ -29,9 +29,24 @@ anything else:
 
 ## 1. Confirm there is something to measure
 
-Settings → Display → Motion smoothness must be **Adaptive**, not Standard. On
-Standard the panel is 60 Hz by setting and both halves of the diff will look
-identical — which is exactly what happened on the first run.
+With DeX **disconnected**, watch for a heartbeat line:
+
+```sh
+su -c 'logcat -s DexRRProbe:V' | grep STATE
+```
+
+```
+STATE  d0{...} d2{} | committed=... physical: (10.0 120.0) ...
+```
+
+If the ceiling there is 120, good — DeX capping it is a real effect to find. If
+it still says 60 with DeX disconnected, the cap is not DeX: check Settings →
+Display → Motion smoothness is **Adaptive**, not Standard. On Standard the panel
+is 60 Hz by setting and both halves of the diff will be identical.
+
+The heartbeat prints every 10 s when the state changes and at least once a
+minute regardless, so a ceiling that never moves is still visible — which a
+change-triggered log cannot do, and is why run 1 could not answer this.
 
 ## 2. Raise the log buffer
 
