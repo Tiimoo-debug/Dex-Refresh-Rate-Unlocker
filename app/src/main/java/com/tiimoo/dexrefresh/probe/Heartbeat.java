@@ -141,13 +141,75 @@ public final class Heartbeat {
         return sb.toString();
     }
 
+    /**
+     * Display ids the framework currently reports, or null if unavailable.
+     *
+     * <p>Dead display generations linger: the HDMI monitor churned through ids
+     * 6, 7, 8, 9 in one session and all four kept showing a frozen "active="
+     * from when they existed. d6 in particular still read 60 Hz long after the
+     * live display had moved to 120, which is actively misleading. Ask the
+     * framework which ids are real and mark the rest.
+     *
+     * <p>Safe from this thread: it is a binder call into DisplayManagerService,
+     * and the heartbeat holds no locks. It must never be done from a hook.
+     */
+    private static java.util.Set<Integer> liveDisplayIds() {
+        try {
+            Class<?> dmg = Reflect.cls(ProbeState.systemServerClassLoader,
+                    "android.hardware.display.DisplayManagerGlobal");
+            if (dmg == null) {
+                return null;
+            }
+            java.lang.reflect.Method getInstance = Reflect.method(dmg, "getInstance");
+            Object global = getInstance == null ? null : getInstance.invoke(null);
+            if (global == null) {
+                return null;
+            }
+            for (java.lang.reflect.Method m : Reflect.methodsNamed(dmg, "getDisplayIds")) {
+                Object r;
+                if (m.getParameterTypes().length == 0) {
+                    r = m.invoke(global);
+                } else if (m.getParameterTypes().length == 1
+                        && m.getParameterTypes()[0] == boolean.class) {
+                    r = m.invoke(global, true);
+                } else {
+                    continue;
+                }
+                if (r instanceof int[]) {
+                    java.util.Set<Integer> out = new java.util.HashSet<Integer>();
+                    for (int id : (int[]) r) {
+                        out.add(id);
+                    }
+                    return out;
+                }
+            }
+        } catch (Throwable ignored) {
+            // fall back to showing everything
+        }
+        return null;
+    }
+
     /** Append every recorded entry sharing a prefix, sorted for stable diffs. */
     private static void appendByPrefix(StringBuilder sb, String prefix, String label) {
+        java.util.Set<Integer> live = liveDisplayIds();
         List<String> keys = new ArrayList<String>();
         for (String k : ProbeState.LAST_SEEN.keySet()) {
-            if (k.startsWith(prefix)) {
-                keys.add(k);
+            if (!k.startsWith(prefix)) {
+                continue;
             }
+            // Hide entries for displays that no longer exist, so a dead
+            // generation's frozen "active=" cannot be read as current state.
+            if (live != null) {
+                try {
+                    int id = Integer.parseInt(k.substring(prefix.length()));
+                    if (!live.contains(id)) {
+                        continue;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // not a display-id key (committed entries are keyed by name)
+                }
+            }
+            keys.add(k);
         }
         if (keys.isEmpty()) {
             return;
