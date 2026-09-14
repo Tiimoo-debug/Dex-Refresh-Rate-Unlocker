@@ -434,6 +434,39 @@ su -c 'setprop debug.dexrr.cmd "unlock -1:19,-1:11,*:10,*:13"'
 global entries are written explicitly as `-1:` because the global bucket is
 always display -1 and never churns.
 
+### The complete constraint set for 144 Hz
+
+Display 9 is the monitor, fastest advertised mode 87 @ 144. Everything that
+narrows its summary (on Android 15 the maximum is the minimum of all vote
+maxima):
+
+| where | priority | vote | effect |
+| --- | --- | --- | --- |
+| global | 19 | `PhysicalVote(0,60)` | physical max 60 |
+| global | 11 | `PhysicalVote(10,120)` | physical max 120 |
+| display 9 | 10 | `PhysicalVote(0,120)` | physical max 120 |
+| display 9 | 13 | `RenderVote(0,120)` | render max 120 |
+| display 9 | 5 | `RenderVote(120,inf)` | render **floor** 120 — harmless, keep |
+
+Physical 144 needs 19, 11 and 10 gone; frames at 144 needs 13 as well. Dropping
+11 and 10 also removes their `DisableRefreshRateSwitchingVote`, which pins the
+display to a single mode and has to go regardless.
+
+For display 0 — the phone, maximum 120 — priorities 11, 10 and 13 all cap at
+exactly 120, which *is* its maximum, so they constrain nothing there. Only 19
+did. That is why dropping 19 alone produced 120 Hz on both panels.
+
+### `auto`, so the set never has to be retyped
+
+```sh
+su -c 'setprop persist.dexrr.unlock "auto"'
+```
+
+The module computes the table above itself, per display, against each display's
+own maximum, and re-checks continuously — surviving redocks, display
+re-creation and reboots. Verified to produce exactly `[10, 11, 13, 19]` from the
+observed vote table, and only `[19]` when the phone is alone.
+
 ### Making it permanent
 
 ```sh

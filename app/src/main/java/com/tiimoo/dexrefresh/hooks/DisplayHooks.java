@@ -744,6 +744,28 @@ public final class DisplayHooks {
                 sb.append("  active=").append(active);
             }
             ProbeState.record("modes:" + key, sb.toString());
+
+            // Same list with resolutions, for the why report. A monitor often
+            // advertises its highest rate only at a lower resolution, so
+            // "144 Hz" can mean dropping from 1440p to 1080p - worth knowing
+            // before unlocking the rate.
+            StringBuilder detail = new StringBuilder();
+            for (Object mode : modes) {
+                Object id = Reflect.call(mode, "getModeId");
+                Object rate = Reflect.call(mode, "getRefreshRate");
+                Object w = Reflect.call(mode, "getPhysicalWidth");
+                Object h = Reflect.call(mode, "getPhysicalHeight");
+                if (id == null || rate == null || w == null || h == null) {
+                    continue;
+                }
+                if (detail.length() > 0) {
+                    detail.append(' ');
+                }
+                detail.append(id).append('@')
+                        .append(Math.round(((Number) rate).floatValue()))
+                        .append('@').append(w).append('x').append(h);
+            }
+            ProbeState.record("modedetail:" + key, detail.toString());
         } catch (Throwable t) {
             HookEngine.reportOnce("captureDisplayInfo", t);
         }

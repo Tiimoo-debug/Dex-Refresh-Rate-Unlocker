@@ -72,6 +72,14 @@ public final class Heartbeat {
     }
 
     private static void tick() {
+        // Auto mode re-derives the selection from the live vote table. Done
+        // here because this thread already holds no locks and runs regularly,
+        // and because displays appear, churn and vanish as DeX is docked.
+        try {
+            Unlock.refreshAuto();
+        } catch (Throwable t) {
+            ProbeLog.postThrowable("auto unlock refresh", t);
+        }
         String line = state();
         long now = System.currentTimeMillis();
         boolean changed = !line.equals(lastLine);

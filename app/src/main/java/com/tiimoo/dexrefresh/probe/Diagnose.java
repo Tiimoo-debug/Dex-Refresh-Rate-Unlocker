@@ -65,9 +65,22 @@ public final class Diagnose {
         String name = ProbeState.LAST_SEEN.get("name:" + displayId);
         sb.append("display: ").append(name == null ? "?" : name).append('\n');
         sb.append("fastest mode advertised: ").append(modes.maxId)
-                .append(" @ ").append(modes.maxRate).append(" Hz\n");
+                .append(" @ ").append(modes.maxRate).append(" Hz ")
+                .append(sizeOf(displayId, modes.maxId)).append('\n');
         sb.append("currently active mode:   ").append(modes.activeId)
-                .append(" @ ").append(modes.activeRate).append(" Hz\n");
+                .append(" @ ").append(modes.activeRate).append(" Hz ")
+                .append(sizeOf(displayId, modes.activeId)).append('\n');
+        String detail = ProbeState.LAST_SEEN.get("modedetail:" + displayId);
+        if (detail != null) {
+            sb.append("all modes: ").append(detail).append('\n');
+        }
+        String maxSize = sizeOf(displayId, modes.maxId);
+        String activeSize = sizeOf(displayId, modes.activeId);
+        if (!maxSize.isEmpty() && !maxSize.equals(activeSize)) {
+            sb.append("NOTE: the fastest mode is a different resolution from the "
+                    + "current one.\n      Unlocking the rate may drop resolution "
+                    + "unless a size vote pins it.\n");
+        }
 
         if (modes.activeRate >= modes.maxRate) {
             sb.append("\nAlready at the maximum this display advertises.\n");
@@ -105,6 +118,44 @@ public final class Diagnose {
                     + "get re-created, such as HDMI.\n");
         }
         ProbeLog.postReport(sb.toString());
+    }
+
+    /**
+     * Priorities that cap any live display below the fastest mode it advertises.
+     *
+     * <p>This is the analysis {@code why} prints, returned as data so the
+     * unlock can act on it directly. Computing it on the device beats a human
+     * reading a vote table and relaying priorities back - which is how a global
+     * 120 Hz cap got missed once already.
+     *
+     * <p>A display is only counted against *its own* maximum, so a vote capping
+     * at 120 is a blocker for a 144 Hz monitor and not for the 120 Hz phone
+     * panel. That keeps the set as small as the hardware allows.
+     */
+    public static java.util.TreeSet<Integer> blockingPriorities() {
+        java.util.TreeSet<Integer> out = new java.util.TreeSet<Integer>();
+        for (int displayId : Snapshots.knownDisplayIds()) {
+            ModeInfo modes = parseModes(ProbeState.LAST_SEEN.get("modes:" + displayId));
+            if (modes == null || modes.maxRate <= 0f) {
+                continue;
+            }
+            addBlockingPriorities(displayId, modes.maxRate, out);
+            addBlockingPriorities(GLOBAL_ID, modes.maxRate, out);
+        }
+        return out;
+    }
+
+    private static void addBlockingPriorities(int displayId, float maxRate,
+                                              java.util.Set<Integer> out) {
+        SparseArray<?> votes = votesFor(displayId);
+        if (votes == null) {
+            return;
+        }
+        for (int i = 0; i < votes.size(); i++) {
+            if (capsBelow(votes.valueAt(i), maxRate, 0)) {
+                out.add(Integer.valueOf(votes.keyAt(i)));
+            }
+        }
     }
 
     /** Add "d:p  <rendered vote>" for each vote on this display capping below max. */
@@ -176,6 +227,28 @@ public final class Diagnose {
             // undiagnosable; better to under-report than to crash
         }
         return false;
+    }
+
+    /** Resolution of one mode id, from the recorded detail list. */
+    private static String sizeOf(int displayId, int modeId) {
+        String detail = ProbeState.LAST_SEEN.get("modedetail:" + displayId);
+        if (detail == null) {
+            return "";
+        }
+        for (String token : detail.trim().split("\\s+")) {
+            // token form: "<id>@<rate>@<width>x<height>"
+            String[] bits = token.split("@");
+            if (bits.length == 3) {
+                try {
+                    if (Integer.parseInt(bits[0]) == modeId) {
+                        return bits[2];
+                    }
+                } catch (NumberFormatException ignored) {
+                    // skip
+                }
+            }
+        }
+        return "";
     }
 
     private static final class ModeInfo {

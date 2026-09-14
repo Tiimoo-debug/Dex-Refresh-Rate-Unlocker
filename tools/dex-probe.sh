@@ -63,8 +63,8 @@ case "$cmd" in
     unlock)
         if [ $# -lt 2 ]; then
             echo "usage: $0 unlock <display:priority,...|off>" >&2
-            echo "   eg: $0 unlock -1:19            drop the global 60Hz cap" >&2
-            echo "       $0 unlock '-1:19,*:10,*:13'  aim for 144Hz" >&2
+            echo "   eg: $0 unlock auto             work it out automatically" >&2
+            echo "       $0 unlock -1:19            drop the global 60Hz cap" >&2
             exit 2
         fi
         setprop "$PROP" "unlock $2 $(date +%s)"

@@ -128,11 +128,12 @@ at display -1 — was holding **both** the phone panel and the external monitor 
 60 Hz. Dropping it gives 120 Hz on both simultaneously.
 
 ```sh
-su -c 'setprop persist.dexrr.unlock "-1:19"'     # survives reboots
+su -c 'setprop persist.dexrr.unlock "auto"'      # survives reboots
 ```
 
-Going further to 144 Hz on the external display additionally needs the
-per-display 120 Hz caps dropped — see [docs/FINDINGS.md](docs/FINDINGS.md).
+Going to 144 Hz on the external display needs three more caps dropped, including
+a second **global** one at priority 11 that is easy to miss; `auto` finds them
+all. See [docs/FINDINGS.md](docs/FINDINGS.md).
 
 ## Phase 2: suppressing the cap
 
@@ -140,12 +141,20 @@ Identified, so the module can now act on it — but only when told to, and a
 reboot clears it:
 
 ```sh
-su -c 'setprop debug.dexrr.cmd "unlock -1:19"'        # this session only
-su -c 'setprop debug.dexrr.cmd "why 9"'               # what caps display 9
-su -c 'setprop debug.dexrr.cmd "unlock -1:19,-1:11,*:10,*:13"'  # aim for 144 Hz
+# Recommended: let the module work out what to drop, and keep it correct.
+su -c 'setprop persist.dexrr.unlock "auto"'
+
+# Or name the votes yourself, from the why report:
+su -c 'setprop debug.dexrr.cmd "why"'                  # what caps each display
+su -c 'setprop debug.dexrr.cmd "unlock -1:19,-1:11,*:10,*:13"'
 su -c 'setprop debug.dexrr.cmd "unlock off"'
-su -c 'setprop persist.dexrr.unlock "-1:19"'          # applied at every boot
 ```
+
+**`auto`** asks, for every display, which votes hold it below the fastest mode
+it advertises, and drops exactly those — re-checked continuously, so it survives
+redocks, display re-creation and reboots without being retyped. Each display is
+measured against *its own* maximum, so nothing is dropped for the 120 Hz phone
+panel that only the 144 Hz monitor needs.
 
 `*:P` drops priority P on every display. Use it rather than a fixed id: the
 HDMI display was observed moving 6 → 7 → 8 → 9 in one session, because it is

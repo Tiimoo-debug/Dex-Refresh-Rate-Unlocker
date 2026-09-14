@@ -47,8 +47,54 @@ public final class Unlock {
     private static final Set<String> DROPPED =
             Collections.synchronizedSet(new LinkedHashSet<String>());
 
+    /** True while the selection is recomputed from the device on every tick. */
+    private static volatile boolean autoMode;
+
     public static boolean active() {
         return !DROPPED.isEmpty();
+    }
+
+    public static boolean isAuto() {
+        return autoMode;
+    }
+
+    /**
+     * Recompute the selection from the live vote table.
+     *
+     * <p>In auto mode the module asks itself the question {@code why} answers -
+     * which votes cap a display below the fastest mode it advertises - and
+     * drops exactly those. It re-evaluates continuously, which matters because
+     * display ids churn (the HDMI screen has been 6, 7, 8 and 9 in one
+     * session), because votes are re-filed when a display is re-created, and
+     * because docking DeX changes which displays exist at all.
+     *
+     * <p>Each display is measured against its own maximum, so nothing is
+     * dropped for the 120 Hz phone panel that only a 144 Hz monitor needs.
+     */
+    public static void refreshAuto() {
+        if (!autoMode) {
+            return;
+        }
+        java.util.TreeSet<Integer> priorities = Diagnose.blockingPriorities();
+        if (priorities.isEmpty()) {
+            // Nothing capping anything, or no displays known yet. Leave the
+            // current selection alone rather than flapping it off and on.
+            return;
+        }
+        Set<String> wanted = new LinkedHashSet<String>();
+        for (Integer priority : priorities) {
+            // Wildcard, not a fixed id: a re-created display files the same
+            // votes under a new id, and a pinned rule would quietly stop
+            // working at the next mode change.
+            wanted.add("*:" + priority);
+        }
+        if (wanted.equals(DROPPED)) {
+            return;
+        }
+        DROPPED.clear();
+        DROPPED.addAll(wanted);
+        ProbeLog.post("UNLOCK auto: dropping %s", DROPPED);
+        clearExisting();
     }
 
     public static boolean shouldDrop(int displayId, int priority) {
@@ -69,12 +115,26 @@ public final class Unlock {
     public static void configure(String spec) {
         if (spec == null || spec.isEmpty() || "off".equalsIgnoreCase(spec)) {
             Set<String> previous = new LinkedHashSet<String>(DROPPED);
+            autoMode = false;
             DROPPED.clear();
             ProbeLog.post("UNLOCK disabled (was %s). Existing votes are NOT restored "
                     + "until whatever files them files them again - reboot for a clean state.",
                     previous);
             return;
         }
+        if ("auto".equalsIgnoreCase(spec.trim())) {
+            autoMode = true;
+            DROPPED.clear();
+            ProbeLog.post("UNLOCK auto mode: the capping votes are worked out from "
+                    + "the device and re-checked continuously.");
+            ProbeLog.post("UNLOCK note: if refresh-rate thermal throttling ever caps "
+                    + "a display below its maximum, auto will drop that too. "
+                    + "CPU and GPU thermal limits are untouched. Use an explicit "
+                    + "list instead if that matters to you.");
+            refreshAuto();
+            return;
+        }
+        autoMode = false;
         DROPPED.clear();
         for (String part : spec.split(",")) {
             String entry = part.trim();
@@ -194,7 +254,9 @@ public final class Unlock {
     }
 
     public static String describe() {
-        return DROPPED.isEmpty() ? "inactive"
-                : String.format(Locale.US, "dropping %s", DROPPED);
+        if (DROPPED.isEmpty()) {
+            return autoMode ? "auto (nothing to drop)" : "inactive";
+        }
+        return String.format(Locale.US, "%sdropping %s", autoMode ? "auto " : "", DROPPED);
     }
 }
