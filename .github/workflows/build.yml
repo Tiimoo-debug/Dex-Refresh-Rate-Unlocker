@@ -24,6 +24,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # This action's default package list includes the legacy "tools"
+          # package, which Google has removed from the SDK repository - it now
+          # fails with "Failed to find package 'tools'" before the build even
+          # starts. Naming the packages we actually need avoids it, and pins
+          # the build to the SDK level the module targets.
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Build debug APK
         run: ./gradlew --no-daemon :app:assembleDebug
