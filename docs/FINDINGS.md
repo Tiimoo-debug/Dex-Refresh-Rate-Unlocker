@@ -491,44 +491,54 @@ ethernet kept working. A direct USB-C cable to the same monitor still worked.
 the 120 Hz ceiling **and** `DisableRefreshRateSwitchingVote`, which pins a
 display to a single mode.
 
-### It is the phone's port, not the dock
+### A wrong conclusion, withdrawn
 
-The same dock drives 144 Hz on a Legion Tab Gen 5 with ethernet, an SSD, a
-keyboard and a mouse all attached at once. So the dock is not bandwidth-starved
-in any absolute sense, and the first version of this note — which blamed the
-dock — was too broad.
+An earlier version of this note argued that the dock gets two DisplayPort lanes
+instead of four, and that 144 Hz through it was therefore never possible. That
+was built on an invalid comparison and is withdrawn.
 
-The number that settles it is the one from before any of this started: through
-this dock, on this phone, the monitor used to run at **60 Hz**; through a direct
-cable it runs at **120 Hz**. Same phone, same monitor. An exact halving is the
-signature of DisplayPort running **two lanes instead of four**, which is what
-happens when USB 3 is simultaneously carrying ethernet and storage. The Legion's
-port does not have to make that trade; the S22 Ultra's does.
+The comparison was:
 
-Two conclusions follow:
+| | rate | software state |
+| --- | --- | --- |
+| through the dock | 60 Hz | **stock** — no DispUnlock, no this module |
+| direct cable | 120 Hz | **after** the unlock removed the global 60 Hz cap |
 
-- **144 Hz through this dock on this phone was never possible.** A 2-lane link
-  at 2K tops out around 60 Hz. That is physics, not policy.
-- **144 Hz on the direct cable remains entirely plausible** — a 4-lane link
-  already carries 120 Hz there.
+Two different software states. And **DeX is 60 Hz by nature** — that is this
+project's entire premise, and it is precisely the vote already identified:
 
-### Why it now shows nothing rather than 60
+```
+d-1 p19 = CombinedVote[PhysicalVote(0,60) DisableRefreshRateSwitchingVote]
+```
 
-The unlock removed the ceiling *and* `DisableRefreshRateSwitchingVote`. Nothing
-is left holding mode selection inside what a 2-lane link can carry, so the
-framework can request a mode that cannot train — and a DisplayPort link that
-fails to train outputs nothing at all rather than falling back. Power delivery
-and ethernet are unaffected, which is exactly the symptom.
+So the dock's 60 Hz is completely explained by the cap we already found. It says
+nothing about how many lanes that dock negotiates. "An exact halving means two
+lanes" was numerology stacked on a bad comparison.
 
-Note which vote did it: the global `PhysicalVote(0,60)` at priority 19. On the
-direct cable that 60 Hz cap is over-conservative and removing it is a clear win.
-Through the dock it happened to match what the link could actually carry.
+### What is actually known about the dock
+
+Nothing yet. The dock's mode list has never been captured, and the dock has
+never been tested with this module in **any** state — only on stock, and with
+the unlock already active. Both of those differ from the state that matters.
+
+The useful measurement is cheap, because the framework's mode list for a
+DisplayPort sink is generally filtered by what the link can carry, not just by
+what the monitor's EDID claims. So:
+
+- plug the dock with the unlock **off** and record `modes:<id>` for the HDMI
+  display
+- compare against the same monitor on the direct cable
+
+If the dock's list is missing the high-rate entries, that is the link limit —
+measured, not inferred. If the list is identical, the link is fine and the
+cause is elsewhere.
 
 ### Two guards added because of this
 
 - **`auto:<hz>`** — a ceiling for auto mode. Caps at or above the ceiling are
   left in place, so a cap matching a real link limit survives while merely
-  policy-driven ones are cleared. `auto:120` is the setting for a dock.
+  policy-driven ones are cleared. Useful whenever a link's capability is
+  unknown, which is currently the case for the dock.
 - **A watchdog.** If a display disappears within 40 seconds of the selection
   changing, the caps are restored automatically and the reason is logged. Being
   left with no picture and no obvious cause is a bad place to put someone.

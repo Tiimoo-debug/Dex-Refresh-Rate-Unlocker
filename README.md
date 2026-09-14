@@ -183,11 +183,14 @@ a blanket rule would silently disable thermal protection. See
 
 ## Known risk: docks and link bandwidth
 
-Dropping the 120 Hz caps also removes `DisableRefreshRateSwitchingVote`, which
-pins a display to one mode. On a bandwidth-limited connection — a dock running
-ethernet usually leaves DisplayPort two lanes instead of four — that can leave
-the framework requesting a mode the link cannot carry, and a DP link that fails
-to train gives **no picture at all** while power and ethernet keep working.
+Dropping the caps also removes `DisableRefreshRateSwitchingVote`, which pins a
+display to one mode. If a link cannot carry the mode that then becomes
+reachable, DisplayPort gives **no picture at all** rather than falling back,
+while power and ethernet keep working.
+
+Whether any particular connection is limited that way is a question to measure
+rather than assume — compare the mode list the framework reports for the same
+monitor on each connection.
 
 If a dock stops showing a display, turn the unlock off first. See
 [docs/FINDINGS.md](docs/FINDINGS.md#dock-regression--read-this-before-enabling-the-unlock).
