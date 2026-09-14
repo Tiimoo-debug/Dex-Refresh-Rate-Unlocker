@@ -171,7 +171,7 @@ public final class Snapshots {
         });
 
         sb.append("========== END SNAPSHOT #").append(n).append(" ==========");
-        ProbeLog.postBlock(sb.toString());
+        ProbeLog.postReport(sb.toString());
     }
 
     private interface Section {

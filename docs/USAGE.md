@@ -107,7 +107,34 @@ For a quicker, less noisy capture of just the vote table:
 su -c 'setprop debug.dexrr.cmd "votes dex-on"'
 ```
 
-## 5. Pull the log
+## 5. Reading reports (snapshots, `why`, class dumps)
+
+**Do not use `tail`.** While displays are active the probe emits roughly sixty
+lines a second, so a report is thousands of lines back within seconds of being
+printed, and `tail -60` shows you the last second of unrelated traffic.
+
+Reports go to their own tag:
+
+```sh
+su -c 'logcat -d -s DexRRReport:V'
+```
+
+That shows snapshots and diagnoses and nothing else. `tools/dex-probe.sh report`
+does the same.
+
+To ask what is capping a display:
+
+```sh
+su -c 'setprop debug.dexrr.cmd "why $(date +%s)"'
+sleep 5
+su -c 'logcat -d -s DexRRReport:V'
+```
+
+The `$(date +%s)` matters: the command channel only fires when the property
+*value changes*, so running the identical string twice does nothing the second
+time. `setprop` itself never prints anything — the answer is only in the log.
+
+## 6. Pull the full log
 
 ```sh
 su -c "logcat -d -s DexRRProbe:V" > /sdcard/dexprobe.txt
@@ -121,7 +148,7 @@ To watch live while docking:
 su -c "logcat -s DexRRProbe:V"
 ```
 
-## 6. Read the diff
+## 7. Read the diff
 
 Compare the two `SNAPSHOT` blocks. In order of how directly they answer the
 question:
@@ -153,7 +180,7 @@ Also scan the running log between the two snapshots for:
   pushed to SurfaceFlinger.
 - `DISPLAY-EVENT ...` — display add/remove, i.e. the DeX session starting.
 
-## 7. Class and field discovery
+## 8. Class and field discovery
 
 When something did not resolve, or a Samsung class shows up that we have no
 names for:

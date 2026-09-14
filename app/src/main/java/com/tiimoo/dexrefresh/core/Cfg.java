@@ -11,6 +11,18 @@ public final class Cfg {
     /** logcat tag. Capture with: logcat -s DexRRProbe:V */
     public static final String TAG = "DexRRProbe";
 
+    /**
+     * Separate tag for reports - snapshots, vote diagnostics, class dumps.
+     *
+     * <p>The main tag emits around sixty lines a second while displays are
+     * active, so a report is thousands of lines back within seconds of being
+     * printed and `tail` will never show it. Reports get their own tag so they
+     * can be read on their own:
+     *
+     *   su -c 'logcat -d -s DexRRReport:V'
+     */
+    public static final String TAG_REPORT = "DexRRReport";
+
     public static final String PKG = "com.tiimoo.dexrefresh";
 
     /** Manually trigger a labelled snapshot (see docs/USAGE.md). */

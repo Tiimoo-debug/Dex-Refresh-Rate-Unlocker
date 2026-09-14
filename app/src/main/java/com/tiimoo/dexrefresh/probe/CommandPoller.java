@@ -151,7 +151,7 @@ public final class CommandPoller {
                     if (dms == null) {
                         ProbeLog.post("graph scan skipped: DisplayManagerService not resolved");
                     } else {
-                        ProbeLog.postBlock(ClassScout.graphScan(dms, 4));
+                        ProbeLog.postReport(ClassScout.graphScan(dms, 4));
                     }
                 }
             });
@@ -162,7 +162,7 @@ public final class CommandPoller {
             Snapshots.runLater(0, new Runnable() {
                 @Override
                 public void run() {
-                    ProbeLog.postBlock(ClassScout.dumpClassSignature(
+                    ProbeLog.postReport(ClassScout.dumpClassSignature(
                             ProbeState.systemServerClassLoader, className));
                 }
             });

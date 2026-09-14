@@ -59,7 +59,7 @@ public final class Diagnose {
         if (modes == null) {
             sb.append("No mode list recorded for display ").append(displayId)
                     .append(". Dock it, wait for a STATE line, then retry.\n");
-            ProbeLog.postBlock(sb.toString());
+            ProbeLog.postReport(sb.toString());
             return;
         }
         String name = ProbeState.LAST_SEEN.get("name:" + displayId);
@@ -73,7 +73,7 @@ public final class Diagnose {
             sb.append("\nAlready at the maximum this display advertises.\n");
             sb.append("If measured frame rate is still lower, the limit is no longer "
                     + "in the vote table - look at render rate or the app itself.\n");
-            ProbeLog.postBlock(sb.toString());
+            ProbeLog.postReport(sb.toString());
             return;
         }
 
@@ -104,7 +104,7 @@ public final class Diagnose {
                     + "as <id>:<priority>;\nprefer * over a fixed id for displays that "
                     + "get re-created, such as HDMI.\n");
         }
-        ProbeLog.postBlock(sb.toString());
+        ProbeLog.postReport(sb.toString());
     }
 
     /** Add "d:p  <rendered vote>" for each vote on this display capping below max. */

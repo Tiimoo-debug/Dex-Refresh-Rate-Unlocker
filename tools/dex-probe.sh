@@ -9,6 +9,7 @@
 #   ./dex-probe.sh save [file]          dump the log buffer to a file
 #   ./dex-probe.sh bigbuffer            raise the logcat buffer to 64M
 #   ./dex-probe.sh why [displayId]      list every vote capping each display
+#   ./dex-probe.sh report               show snapshots/diagnoses, no noise
 #   ./dex-probe.sh unlock <spec|off>    drop capping votes this session
 #   ./dex-probe.sh persist <spec>       same, applied at every boot
 #
@@ -17,6 +18,7 @@
 set -u
 
 TAG=DexRRProbe
+TAG_REPORT=DexRRReport
 
 # Re-exec as root if we are not already.
 if [ "$(id -u)" != "0" ]; then
@@ -76,6 +78,12 @@ case "$cmd" in
     watch)
         exec logcat -s "$TAG":V
         ;;
+    report|reports)
+        # Reports only. The main tag emits ~60 lines/second while displays are
+        # active, so a snapshot or diagnosis is buried within seconds and tail
+        # will never show it.
+        exec logcat -d -s "$TAG_REPORT":V
+        ;;
     save)
         out=${2:-/sdcard/dexprobe-$(date +%Y%m%d-%H%M%S).txt}
         logcat -d -s "$TAG":V > "$out"
@@ -87,6 +95,6 @@ case "$cmd" in
         logcat -G 64M && echo "logcat buffer raised to 64M (resets on reboot)"
         ;;
     *)
-        sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
         ;;
 esac

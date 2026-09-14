@@ -82,6 +82,25 @@ public final class ProbeLog {
         post(context + " -> " + t.getClass().getName() + ": " + t.getMessage());
     }
 
+    /**
+     * Emit a report - a snapshot, a vote diagnosis, a class dump.
+     *
+     * <p>Goes to {@link Cfg#TAG_REPORT} as well as the normal stream. The
+     * normal stream is far too noisy to find a report in after the fact; this
+     * way `logcat -s DexRRReport:V` shows reports and nothing else.
+     */
+    public static void postReport(String block) {
+        if (block == null) {
+            return;
+        }
+        for (String line : block.split("\n", -1)) {
+            String stamped = SEQ.incrementAndGet() + "| " + line;
+            if (!QUEUE.offer(REPORT_MARKER + stamped)) {
+                DROPPED.incrementAndGet();
+            }
+        }
+    }
+
     /** Emit a multi-line block as individual lines so logcat does not truncate. */
     public static void postBlock(String block) {
         if (block == null) {
@@ -119,9 +138,16 @@ public final class ProbeLog {
         }
     }
 
+    /** Prefix marking a queued line as a report; stripped before writing. */
+    private static final String REPORT_MARKER = "\u0000R";
+
     private static void write(String line) {
+        boolean report = line.startsWith(REPORT_MARKER);
+        if (report) {
+            line = line.substring(REPORT_MARKER.length());
+        }
         try {
-            Log.i(Cfg.TAG, line);
+            Log.i(report ? Cfg.TAG_REPORT : Cfg.TAG, line);
         } catch (Throwable ignored) {
             // logcat unavailable; fall through to the Xposed log
         }
