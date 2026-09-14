@@ -51,6 +51,70 @@ public final class Unlock {
     /** True while the selection is recomputed from the device on every tick. */
     private static volatile boolean autoMode;
 
+    /**
+     * Upper bound for auto mode, or 0 for "whatever the display advertises".
+     *
+     * <p>Exists because removing a cap is not always safe. A DisplayPort link
+     * running two lanes instead of four - which is what a dock does when USB 3
+     * is also carrying ethernet - has a real ceiling well below what the
+     * monitor's EDID advertises. Remove the cap there and the framework can ask
+     * for a mode the link cannot train, and a link that cannot train outputs
+     * nothing at all rather than falling back. "auto:120" keeps caps at or
+     * above 120 in place while still clearing anything lower.
+     */
+    private static volatile float ceiling;
+
+    /** When the selection last changed, for the watchdog below. */
+    private static volatile long lastChangeMs;
+    private static volatile int displaysAtChange;
+    private static volatile boolean watchdogArmed;
+
+    /**
+     * Undo the unlock if applying it made a display disappear.
+     *
+     * <p>Dropping a refresh-rate cap on a bandwidth-limited link can stop a
+     * display coming up entirely - observed with a dock that had been working
+     * at 60 Hz and went black once the caps were removed. Being left with no
+     * picture and no obvious cause is a bad place to put someone, so if a
+     * display vanishes within seconds of the selection changing, put the caps
+     * back and say so.
+     *
+     * <p>Deliberately bounded to a short window after a change: a display
+     * removed later is someone unplugging a cable, not this.
+     */
+    public static void watchdog() {
+        if (!watchdogArmed) {
+            return;
+        }
+        long sinceChange = System.currentTimeMillis() - lastChangeMs;
+        if (sinceChange > WATCHDOG_WINDOW_MS) {
+            watchdogArmed = false;
+            return;
+        }
+        java.util.Set<Integer> live = Heartbeat.liveDisplayIds();
+        if (live == null || live.size() >= displaysAtChange) {
+            return;
+        }
+        watchdogArmed = false;
+        ProbeLog.post("UNLOCK WATCHDOG: a display disappeared %dms after the "
+                + "selection changed (%d displays -> %d). Restoring the caps.",
+                sinceChange, displaysAtChange, live.size());
+        ProbeLog.post("UNLOCK WATCHDOG: this usually means the link cannot carry "
+                + "the mode that became reachable. Try 'auto:120', or leave the "
+                + "unlock off for this connection.");
+        configure("off");
+    }
+
+    private static final long WATCHDOG_WINDOW_MS = 40_000L;
+
+    /** Note that the selection changed, so the watchdog can judge what follows. */
+    private static void armWatchdog() {
+        java.util.Set<Integer> live = Heartbeat.liveDisplayIds();
+        displaysAtChange = live == null ? 0 : live.size();
+        lastChangeMs = System.currentTimeMillis();
+        watchdogArmed = displaysAtChange > 0;
+    }
+
     public static boolean active() {
         return !DROPPED.isEmpty();
     }
@@ -76,7 +140,7 @@ public final class Unlock {
         if (!autoMode) {
             return;
         }
-        java.util.TreeSet<Integer> priorities = Diagnose.blockingPriorities();
+        java.util.TreeSet<Integer> priorities = Diagnose.blockingPriorities(ceiling);
         if (priorities.isEmpty()) {
             // Nothing capping anything, or no displays known yet. Leave the
             // current selection alone rather than flapping it off and on.
@@ -94,7 +158,9 @@ public final class Unlock {
         }
         DROPPED.clear();
         DROPPED.addAll(wanted);
-        ProbeLog.post("UNLOCK auto: dropping %s", DROPPED);
+        ProbeLog.post("UNLOCK auto: dropping %s%s", DROPPED,
+                ceiling > 0f ? " (ceiling " + (int) ceiling + "Hz)" : "");
+        armWatchdog();
         clearExisting();
     }
 
@@ -117,13 +183,25 @@ public final class Unlock {
         if (spec == null || spec.isEmpty() || "off".equalsIgnoreCase(spec)) {
             Set<String> previous = new LinkedHashSet<String>(DROPPED);
             autoMode = false;
+            ceiling = 0f;
+            watchdogArmed = false;
             DROPPED.clear();
             ProbeLog.post("UNLOCK disabled (was %s). Existing votes are NOT restored "
                     + "until whatever files them files them again - reboot for a clean state.",
                     previous);
             return;
         }
-        if ("auto".equalsIgnoreCase(spec.trim())) {
+        String trimmed = spec.trim();
+        if (trimmed.toLowerCase(Locale.US).startsWith("auto")) {
+            ceiling = 0f;
+            int colon = trimmed.indexOf(':');
+            if (colon > 0) {
+                try {
+                    ceiling = Float.parseFloat(trimmed.substring(colon + 1).trim());
+                } catch (NumberFormatException e) {
+                    ProbeLog.post("UNLOCK ignoring unreadable ceiling in '%s'", trimmed);
+                }
+            }
             autoMode = true;
             DROPPED.clear();
             ProbeLog.post("UNLOCK auto mode: the capping votes are worked out from "
@@ -136,6 +214,7 @@ public final class Unlock {
             return;
         }
         autoMode = false;
+        ceiling = 0f;
         DROPPED.clear();
         for (String part : spec.split(",")) {
             String entry = part.trim();
@@ -165,6 +244,7 @@ public final class Unlock {
             return;
         }
         ProbeLog.post("UNLOCK active, suppressing votes %s", DROPPED);
+        armWatchdog();
         ProbeLog.post("UNLOCK reminder: if one of these is a thermal or low-power "
                 + "cap, you have just disabled it. Reboot clears this.");
         clearExisting();

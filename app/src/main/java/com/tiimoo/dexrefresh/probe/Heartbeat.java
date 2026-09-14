@@ -79,6 +79,7 @@ public final class Heartbeat {
         // and because displays appear, churn and vanish as DeX is docked.
         try {
             Unlock.refreshAuto();
+            Unlock.watchdog();
         } catch (Throwable t) {
             ProbeLog.postThrowable("auto unlock refresh", t);
         }
@@ -222,7 +223,7 @@ public final class Heartbeat {
      * <p>Safe from this thread: it is a binder call into DisplayManagerService
      * and the heartbeat holds no locks. It must never be done from a hook.
      */
-    private static Set<Integer> liveDisplayIds() {
+    static Set<Integer> liveDisplayIds() {
         try {
             Class<?> dmg = Reflect.cls(ProbeState.systemServerClassLoader,
                     "android.hardware.display.DisplayManagerGlobal");

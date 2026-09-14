@@ -129,15 +129,19 @@ public final class Diagnose {
      * at 120 is a blocker for a 144 Hz monitor and not for the 120 Hz phone
      * panel. That keeps the set as small as the hardware allows.
      */
-    public static java.util.TreeSet<Integer> blockingPriorities() {
+    public static java.util.TreeSet<Integer> blockingPriorities(float ceiling) {
         java.util.TreeSet<Integer> out = new java.util.TreeSet<Integer>();
         for (int displayId : Votes.displayIds()) {
             ModeInfo modes = parseModes(ProbeState.LAST_SEEN.get("modes:" + displayId));
             if (modes == null || modes.maxRate <= 0f) {
                 continue;
             }
-            addBlockingPriorities(displayId, modes.maxRate, out);
-            addBlockingPriorities(Votes.GLOBAL_ID, modes.maxRate, out);
+            // A ceiling keeps caps at or above it in place, so a cap that
+            // matches what a bandwidth-limited link can actually carry is not
+            // removed along with the ones that are merely policy.
+            float target = ceiling > 0f ? Math.min(ceiling, modes.maxRate) : modes.maxRate;
+            addBlockingPriorities(displayId, target, out);
+            addBlockingPriorities(Votes.GLOBAL_ID, target, out);
         }
         return out;
     }

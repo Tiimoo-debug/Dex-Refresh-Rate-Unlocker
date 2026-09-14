@@ -65,13 +65,27 @@ public class StatusActivity extends Activity {
         root.addView(heading("Unlock"));
         root.addView(body("Auto works out which votes hold each display below "
                 + "the fastest mode it advertises, and drops exactly those. It "
-                + "re-checks continuously, so redocks and reboots keep working."));
+                + "re-checks continuously, so redocks and reboots keep working.\n\n"
+                + "On a dock, DisplayPort often runs two lanes instead of four, "
+                + "so the link has a real ceiling below what the monitor "
+                + "advertises. Removing the cap there can leave no picture at "
+                + "all. Use the 120 Hz option for docks, or turn the unlock "
+                + "off. If a display vanishes just after a change, the module "
+                + "restores the caps by itself."));
         root.addView(button("Enable auto (persists across reboots)",
                 new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         run("setprop " + Cfg.PROP_PERSIST_UNLOCK + " auto",
                                 "Auto unlock enabled.");
+                    }
+                }));
+        root.addView(button("Enable auto, capped at 120 Hz (safer on docks)",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        run("setprop " + Cfg.PROP_PERSIST_UNLOCK + " auto:120",
+                                "Auto unlock enabled, ceiling 120 Hz.");
                     }
                 }));
         root.addView(button("Turn unlock off", new View.OnClickListener() {

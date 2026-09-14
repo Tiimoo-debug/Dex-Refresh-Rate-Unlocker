@@ -491,17 +491,49 @@ ethernet kept working. A direct USB-C cable to the same monitor still worked.
 the 120 Hz ceiling **and** `DisableRefreshRateSwitchingVote`, which pins a
 display to a single mode.
 
-Bandwidth is the likely mechanism. A direct cable gives DisplayPort four lanes;
-a dock running USB 3 for ethernet typically leaves DP two lanes, roughly halving
-available bandwidth. With the ceiling gone the framework may request a mode the
-link cannot carry, and with switching re-enabled it may try to change into one.
-A DP link that fails to train produces no picture while power and ethernet
-continue working — exactly the symptom.
+### It is the phone's port, not the dock
 
-Which raises a real possibility worth stating plainly: **the 120 Hz cap may not
-be arbitrary.** It may be Samsung sizing mode selection to the link actually
-negotiated. If so, 144 Hz is reachable on a 4-lane direct connection and not
-through a 2-lane dock, and no software change alters that.
+The same dock drives 144 Hz on a Legion Tab Gen 5 with ethernet, an SSD, a
+keyboard and a mouse all attached at once. So the dock is not bandwidth-starved
+in any absolute sense, and the first version of this note — which blamed the
+dock — was too broad.
+
+The number that settles it is the one from before any of this started: through
+this dock, on this phone, the monitor used to run at **60 Hz**; through a direct
+cable it runs at **120 Hz**. Same phone, same monitor. An exact halving is the
+signature of DisplayPort running **two lanes instead of four**, which is what
+happens when USB 3 is simultaneously carrying ethernet and storage. The Legion's
+port does not have to make that trade; the S22 Ultra's does.
+
+Two conclusions follow:
+
+- **144 Hz through this dock on this phone was never possible.** A 2-lane link
+  at 2K tops out around 60 Hz. That is physics, not policy.
+- **144 Hz on the direct cable remains entirely plausible** — a 4-lane link
+  already carries 120 Hz there.
+
+### Why it now shows nothing rather than 60
+
+The unlock removed the ceiling *and* `DisableRefreshRateSwitchingVote`. Nothing
+is left holding mode selection inside what a 2-lane link can carry, so the
+framework can request a mode that cannot train — and a DisplayPort link that
+fails to train outputs nothing at all rather than falling back. Power delivery
+and ethernet are unaffected, which is exactly the symptom.
+
+Note which vote did it: the global `PhysicalVote(0,60)` at priority 19. On the
+direct cable that 60 Hz cap is over-conservative and removing it is a clear win.
+Through the dock it happened to match what the link could actually carry.
+
+### Two guards added because of this
+
+- **`auto:<hz>`** — a ceiling for auto mode. Caps at or above the ceiling are
+  left in place, so a cap matching a real link limit survives while merely
+  policy-driven ones are cleared. `auto:120` is the setting for a dock.
+- **A watchdog.** If a display disappears within 40 seconds of the selection
+  changing, the caps are restored automatically and the reason is logged. Being
+  left with no picture and no obvious cause is a bad place to put someone.
+  Bounded to a short window after a change, so unplugging a cable later is not
+  mistaken for it.
 
 ### Deciding it
 
