@@ -131,6 +131,9 @@ public final class Heartbeat {
         appendByPrefix(sb, "modes:", "modes");
         appendByPrefix(sb, "refreshRateMode:", "rrMode");
         appendByPrefix(sb, "committed:", "committed");
+        if (Unlock.active()) {
+            sb.append("| UNLOCK ").append(Unlock.describe()).append(' ');
+        }
         String restrict = ProbeState.LAST_SEEN.get("restrictHighRefreshRate");
         if (restrict != null) {
             sb.append(" | restrictHRR=").append(restrict);

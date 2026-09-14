@@ -29,6 +29,11 @@ public final class ProbeState {
     /** system_server Context, resolved at boot-completed. */
     public static volatile Object systemContext;
 
+    /** com.android.server.display.mode.VotesStorage, and its vote entry points. */
+    public static volatile Object votesStorage;
+    public static volatile java.lang.reflect.Method updateVoteMethod;
+    public static volatile java.lang.reflect.Method updateGlobalVoteMethod;
+
     /** priority int -> constant name, harvested from the Vote class. */
     public static final Map<Integer, String> VOTE_PRIORITY_NAMES = new ConcurrentHashMap<>();
 

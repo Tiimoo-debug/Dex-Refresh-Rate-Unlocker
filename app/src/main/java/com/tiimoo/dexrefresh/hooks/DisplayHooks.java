@@ -11,6 +11,7 @@ import com.tiimoo.dexrefresh.probe.Heartbeat;
 import com.tiimoo.dexrefresh.probe.ControlReceiver;
 import com.tiimoo.dexrefresh.probe.ProbeState;
 import com.tiimoo.dexrefresh.probe.Snapshots;
+import com.tiimoo.dexrefresh.probe.Unlock;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -410,12 +411,25 @@ public final class DisplayHooks {
                 continue;
             }
             final String label = methodName;
+            // Keep handles so Unlock can clear a vote that was filed before it
+            // was configured - the cap we are after is filed once and then
+            // never touched again, so suppressing future calls alone would
+            // leave it in place indefinitely.
+            if ("updateVote".equals(methodName) && perDisplay) {
+                ProbeState.updateVoteMethod = m;
+            } else if ("updateGlobalVote".equals(methodName)) {
+                ProbeState.updateGlobalVoteMethod = m;
+            }
             try {
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
                         try {
+                            if (ProbeState.votesStorage == null) {
+                                ProbeState.votesStorage = param.thisObject;
+                            }
                             logVote(label, param.args, perDisplay);
+                            maybeSuppress(param, perDisplay);
                         } catch (Throwable t) {
                             HookEngine.reportOnce("vote:" + label, t);
                         }
@@ -480,6 +494,46 @@ public final class DisplayHooks {
             ProbeLog.post("   ^ filed by:");
             logCallerStack();
         }
+    }
+
+    /**
+     * Phase 2, and inert unless the user has named votes to drop.
+     *
+     * <p>Skipping the original call keeps the vote out of the storage entirely,
+     * which is what lets the mode director pick a higher mode. It is the only
+     * place in this module that changes behaviour.
+     */
+    private static void maybeSuppress(XC_MethodHook.MethodHookParam param, boolean perDisplay) {
+        if (!Unlock.active() || param.args == null || param.args.length < 1) {
+            return;
+        }
+        int displayId;
+        int priority;
+        if (perDisplay) {
+            if (args3Invalid(param.args)) {
+                return;
+            }
+            displayId = (Integer) param.args[0];
+            priority = (Integer) param.args[1];
+        } else {
+            if (!(param.args[0] instanceof Integer)) {
+                return;
+            }
+            displayId = GLOBAL_DISPLAY_ID;
+            priority = (Integer) param.args[0];
+        }
+        if (!Unlock.shouldDrop(displayId, priority)) {
+            return;
+        }
+        param.setResult(null);
+        if (Throttle.allow("suppress:" + displayId + ":" + priority, 5,
+                Cfg.RATE_LIMIT_WINDOW_MS)) {
+            ProbeLog.post("UNLOCK suppressed vote display=%d priority=%d", displayId, priority);
+        }
+    }
+
+    private static boolean args3Invalid(Object[] args) {
+        return args.length < 2 || !(args[0] instanceof Integer) || !(args[1] instanceof Integer);
     }
 
     private static boolean shouldTraceVote(int displayId, Object vote) {

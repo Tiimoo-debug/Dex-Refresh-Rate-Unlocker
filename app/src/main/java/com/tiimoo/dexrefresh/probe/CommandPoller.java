@@ -23,6 +23,8 @@ import java.util.Locale;
  *   su -c 'setprop debug.dexrr.cmd "votes"'
  *   su -c 'setprop debug.dexrr.cmd "scout"'
  *   su -c 'setprop debug.dexrr.cmd "class com.android.server.display.mode.Vote"'
+ *   su -c 'setprop debug.dexrr.cmd "unlock -1:19"'     drop a capping vote
+ *   su -c 'setprop debug.dexrr.cmd "unlock off"'
  * </pre>
  *
  * <p>Any change to the value runs the command. Repeat a command by varying the
@@ -101,6 +103,10 @@ public final class CommandPoller {
             Snapshots.request(parts.length > 1 ? parts[1] : "votes-only", 2, false);
             return;
         }
+        if ("unlock".equals(verb)) {
+            Unlock.configure(parts.length > 1 ? parts[1] : "off");
+            return;
+        }
         if ("scout".equals(verb)) {
             Snapshots.runLater(0, new Runnable() {
                 @Override
@@ -126,8 +132,8 @@ public final class CommandPoller {
             });
             return;
         }
-        ProbeLog.post("unknown command '%s' (try: snapshot <label> | votes | scout | class <fqcn>)",
-                value);
+        ProbeLog.post("unknown command '%s' (try: snapshot <label> | votes | scout"
+                + " | class <fqcn> | unlock <display:priority,...> | unlock off)", value);
     }
 
     private static Method propertyGetter(ClassLoader cl) {

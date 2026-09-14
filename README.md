@@ -6,7 +6,9 @@ below what the panel supports.
 **Target device:** Galaxy S22 Ultra (SM-S908B), One UI 7 / **Android 15**
 (API 35), Exynos 2200, rooted with Magisk, LSPosed installed.
 
-**This build changes nothing.** It is observation only: it hooks the display and
+**Observation only by default.** Phase 2 adds opt-in vote suppression, inert
+until you explicitly name votes to drop; with nothing configured the module
+changes nothing: it hooks the display and
 refresh-rate decision points inside `system_server` and logs what passes through
 them. No hook calls `setResult`, replaces an argument, or writes a field. The
 point of this pass is to find out *where* the cap is applied before trying to
@@ -117,6 +119,22 @@ It is not the cap we are after, though: the vote raises the floor to 60 Hz
 (`min=60, max=Infinity`) rather than lowering the ceiling, which is LTPO idle
 prevention. The ceiling was already 60 in both halves of the first capture.
 Full write-up, including what went wrong with that run, in
+[docs/FINDINGS.md](docs/FINDINGS.md).
+
+## Phase 2: suppressing the cap
+
+Identified, so the module can now act on it — but only when told to, and a
+reboot clears it:
+
+```sh
+su -c 'setprop debug.dexrr.cmd "unlock -1:19"'   # drop the global 60 Hz vote
+su -c 'setprop debug.dexrr.cmd "unlock off"'
+```
+
+It suppresses the exact `display:priority` votes you name, rather than applying
+a blanket rule — because R8 stripped the priority constants from this firmware,
+so nothing can distinguish a thermal-throttling vote from a DeX one by name, and
+a blanket rule would silently disable thermal protection. See
 [docs/FINDINGS.md](docs/FINDINGS.md).
 
 ## Safety notes

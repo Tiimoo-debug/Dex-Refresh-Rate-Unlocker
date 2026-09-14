@@ -306,17 +306,61 @@ Whatever is composited into that virtual display is produced at 60 Hz regardless
 of what the monitor is doing. This is the same class of problem LibreDeX hit and
 solved by patching the virtual display's advertised mode.
 
-### Prime suspect for the global vote
+### Not the Motion Smoothness setting
 
-`refreshRateMode = 2` on every display, and a global `PhysicalVote(0,60)` with
-switching disabled, is exactly what **Motion Smoothness set to Standard** would
-produce. That is a free test and it has to be ruled out before any code is
-written to defeat the vote — writing a hook to override a setting the user can
-simply change would be absurd.
+The obvious explanation for a global `PhysicalVote(0,60)` with switching
+disabled was Motion Smoothness on Standard. **Ruled out: the device is set to
+Adaptive.** So something else installs a global 60 Hz cap on a phone whose panel
+is allowed to run at 120 and whose monitor can do 144 — which makes the vote a
+legitimate target rather than a setting to respect.
 
-Run 4 now prints the caller stack whenever a global vote or a vote capping
-physical refresh below 120 is filed, which will name the subsystem responsible
-either way.
+Run 4 prints the caller stack whenever a global vote, or any vote capping
+physical refresh below 120, is filed. That will name the subsystem responsible,
+the same way it identified restrictHighRefreshRate's caller.
+
+Still worth confirming with one capture: **is p19 present with DeX
+disconnected?** If it only appears while docked, it is DeX's cap and the hunt is
+over. Every capture so far has been with DeX connected, so this has never
+actually been tested.
+
+## Phase 2 — selective vote suppression (opt-in, off by default)
+
+The filtering point is identified, so the module can now suppress it. It stays
+observation-only until explicitly told otherwise, and a reboot clears it.
+
+```sh
+su -c 'setprop debug.dexrr.cmd "unlock -1:19"'       # drop global priority 19
+su -c 'setprop debug.dexrr.cmd "unlock -1:19,7:10"'  # and display 7 priority 10
+su -c 'setprop debug.dexrr.cmd "unlock off"'
+```
+
+### Why it drops named (display, priority) pairs rather than applying a rule
+
+The tempting design is "drop any vote that caps physical refresh below the panel
+maximum". That would also drop **thermal throttling**, which exists to stop the
+phone cooking itself, and low-power caps. Because R8 stripped the priority
+constants from this firmware, the module cannot distinguish a thermal vote from
+a DeX vote by name — and guessing wrong means silently disabling thermal
+protection.
+
+So the votes are named explicitly, read off the log. Precise, reversible, and it
+doubles as the experiment: drop the suspect, watch the next `STATE` line, see
+whether the monitor moves to 144.
+
+Votes already filed before the unlock is configured are actively cleared (via
+`invokeOriginalMethod`, so the clearing call is not caught by the suppression
+hook). Suppressing future calls alone would not help: the cap is filed once and
+then never touched again, which is precisely why it took three runs to find.
+
+### Expected order of attack
+
+1. `unlock -1:19` — the global 60 Hz cap. If the monitor jumps to 120, the
+   remaining limit is the per-display 120 cap.
+2. `unlock -1:19,7:10` — adds display 7's `PhysicalVote(0,120)`. Check whether
+   `p13 = RenderVote(0,120)` then becomes the binding constraint.
+3. The DeX `"Desktop"` virtual display's single 60 Hz mode is a separate
+   problem that votes cannot fix — it needs the advertised mode patched, as
+   LibreDeX did.
 
 ## Changes made for run 4
 
