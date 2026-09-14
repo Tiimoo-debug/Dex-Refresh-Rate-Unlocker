@@ -73,6 +73,17 @@ public final class CommandPoller {
         } catch (Throwable t) {
             ProbeLog.postThrowable("late receiver registration", t);
         }
+        // A selection stored in persist.dexrr.unlock survives reboots, so the
+        // unlock can be a standing setting rather than something retyped after
+        // every boot.
+        try {
+            Object persisted = get.invoke(null, Cfg.PROP_PERSIST_UNLOCK, "");
+            if (persisted instanceof String) {
+                Unlock.applyPersisted((String) persisted);
+            }
+        } catch (Throwable t) {
+            ProbeLog.postThrowable("persisted unlock", t);
+        }
         while (true) {
             try {
                 Object raw = get.invoke(null, Cfg.PROP_CMD, "");

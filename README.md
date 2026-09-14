@@ -121,15 +121,35 @@ prevention. The ceiling was already 60 in both halves of the first capture.
 Full write-up, including what went wrong with that run, in
 [docs/FINDINGS.md](docs/FINDINGS.md).
 
+## Result
+
+A single global vote — `CombinedVote[PhysicalVote(0,60) DisableRefreshRateSwitchingVote]`
+at display -1 — was holding **both** the phone panel and the external monitor to
+60 Hz. Dropping it gives 120 Hz on both simultaneously.
+
+```sh
+su -c 'setprop persist.dexrr.unlock "-1:19"'     # survives reboots
+```
+
+Going further to 144 Hz on the external display additionally needs the
+per-display 120 Hz caps dropped — see [docs/FINDINGS.md](docs/FINDINGS.md).
+
 ## Phase 2: suppressing the cap
 
 Identified, so the module can now act on it — but only when told to, and a
 reboot clears it:
 
 ```sh
-su -c 'setprop debug.dexrr.cmd "unlock -1:19"'   # drop the global 60 Hz vote
+su -c 'setprop debug.dexrr.cmd "unlock -1:19"'        # this session only
+su -c 'setprop debug.dexrr.cmd "unlock -1:19,*:10,*:13"'  # aim for 144 Hz
 su -c 'setprop debug.dexrr.cmd "unlock off"'
+su -c 'setprop persist.dexrr.unlock "-1:19"'          # applied at every boot
 ```
+
+`*:P` drops priority P on every display. Use it rather than a fixed id: the
+HDMI display was observed moving 6 → 7 → 8 → 9 in one session, because it is
+re-created on every mode change, so an id-specific rule stops working after a
+redock.
 
 It suppresses the exact `display:priority` votes you name, rather than applying
 a blanket rule — because R8 stripped the priority constants from this firmware,

@@ -52,7 +52,15 @@ public final class Unlock {
     }
 
     public static boolean shouldDrop(int displayId, int priority) {
-        return !DROPPED.isEmpty() && DROPPED.contains(displayId + ":" + priority);
+        if (DROPPED.isEmpty()) {
+            return false;
+        }
+        // "*" matters because display ids are not stable: the HDMI screen was
+        // observed moving 6 -> 7 -> 8 -> 9 inside a single session, since the
+        // display is re-created on every mode change. A rule pinned to one id
+        // would work once and then silently stop working after a redock.
+        return DROPPED.contains(displayId + ":" + priority)
+                || DROPPED.contains("*:" + priority);
     }
 
     /**
@@ -80,9 +88,13 @@ public final class Unlock {
                 continue;
             }
             try {
-                int displayId = Integer.parseInt(halves[0].trim());
+                String displayPart = halves[0].trim();
                 int priority = Integer.parseInt(halves[1].trim());
-                DROPPED.add(displayId + ":" + priority);
+                if ("*".equals(displayPart)) {
+                    DROPPED.add("*:" + priority);
+                } else {
+                    DROPPED.add(Integer.parseInt(displayPart) + ":" + priority);
+                }
             } catch (NumberFormatException e) {
                 ProbeLog.post("UNLOCK ignoring non-numeric entry '%s'", entry);
             }
@@ -114,7 +126,7 @@ public final class Unlock {
                     + "They will be suppressed as soon as they are re-filed.");
             return;
         }
-        for (String entry : new LinkedHashSet<String>(DROPPED)) {
+        for (String entry : expandWildcards()) {
             String[] halves = entry.split(":");
             int displayId = Integer.parseInt(halves[0]);
             int priority = Integer.parseInt(halves[1]);
@@ -137,6 +149,44 @@ public final class Unlock {
                 ProbeLog.post("UNLOCK failed to clear %s: %s", entry, t);
             }
         }
+    }
+
+    /** Turn "*:P" into one concrete entry per live display, so it can be cleared. */
+    private static Set<String> expandWildcards() {
+        Set<String> out = new LinkedHashSet<String>();
+        for (String entry : new LinkedHashSet<String>(DROPPED)) {
+            if (!entry.startsWith("*:")) {
+                out.add(entry);
+                continue;
+            }
+            String priority = entry.substring(2);
+            out.add("-1:" + priority);
+            for (int displayId : Snapshots.knownDisplayIds()) {
+                out.add(displayId + ":" + priority);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Apply a selection stored in a persist.* property.
+     *
+     * <p>Without this the unlock has to be re-applied by hand after every
+     * reboot, which makes it useless as a daily-driver setting. A persist
+     * property is durable, explicit, and removed just as easily:
+     *
+     * <pre>
+     *   su -c 'setprop persist.dexrr.unlock "-1:19,*:10,*:13"'   enable at boot
+     *   su -c 'setprop persist.dexrr.unlock ""'                  stop
+     * </pre>
+     */
+    public static void applyPersisted(String spec) {
+        if (spec == null || spec.trim().isEmpty()) {
+            return;
+        }
+        ProbeLog.post("UNLOCK applying persisted selection from %s: %s",
+                com.tiimoo.dexrefresh.core.Cfg.PROP_PERSIST_UNLOCK, spec);
+        configure(spec.trim());
     }
 
     public static String describe() {

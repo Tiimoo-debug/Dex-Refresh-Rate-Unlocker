@@ -460,7 +460,7 @@ public final class Snapshots {
     }
 
     /** Display ids present in the vote map, plus 0 as a floor. */
-    private static int[] knownDisplayIds() {
+    static int[] knownDisplayIds() {
         java.util.TreeSet<Integer> ids = new java.util.TreeSet<Integer>();
         ids.add(0);
         try {

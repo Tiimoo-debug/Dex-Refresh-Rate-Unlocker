@@ -373,6 +373,58 @@ then never touched again, which is precisely why it took three runs to find.
   instead of a mode array truncated at 3942 characters.
 - **Samsung's `DisplayInfo.refreshRateMode`** surfaced in the heartbeat.
 
+## Run 4 — it works. Both panels at 120 Hz.
+
+Dropping the single global vote did it:
+
+```sh
+su -c 'setprop debug.dexrr.cmd "unlock -1:19"'
+```
+
+| | before | after |
+| --- | --- | --- |
+| phone panel | baseModeId=3, physical (60,60) | **baseModeId=1, physical (120,120)** |
+| HDMI screen | active mode 44 = 60 Hz | **active mode 46/67/88 = 120 Hz** |
+| DeX Desktop VD | physical (10,60) | physical (10,120) |
+
+One global `PhysicalVote(0,60)` was holding *both* panels to 60 Hz. Removing it
+gives 120 Hz on the phone and the external display simultaneously — which,
+per the device owner, is better than One UI 5 ever managed: there the phone
+panel was pinned at 60 while the external ran 144, and DeX dropped to 50 Hz
+whenever the phone screen came on.
+
+### What still caps at 120
+
+```
+d9{ p5 =RenderVote(120,inf)
+    p10=CombinedVote[PhysicalVote(0,120) DisableRefreshRateSwitchingVote]
+    p13=RenderVote(0,120) }
+```
+
+`p10` caps **physical** refresh at 120, which puts mode 87 @ 144 out of reach.
+`p13` caps **render** at 120. Both look like the phone panel's maximum being
+applied to an external display that exceeds it.
+
+### Display ids are not stable
+
+The HDMI screen moved **6 → 7 → 8 → 9 within a single session** — it is
+re-created on every mode change. A rule pinned to one id works once and then
+silently stops working after a redock. Hence wildcard targeting:
+
+```sh
+su -c 'setprop debug.dexrr.cmd "unlock -1:19,*:10,*:13"'
+```
+
+`*:P` drops priority P on every display, however the ids are renumbered.
+
+### Making it permanent
+
+```sh
+su -c 'setprop persist.dexrr.unlock "-1:19,*:10,*:13"'
+```
+
+Read and applied at boot. `setprop persist.dexrr.unlock ""` stops it.
+
 ## Open question after run 3
 
 Answered by run 3: the framework does expose 144 Hz for the monitor, and a

@@ -8,6 +8,8 @@
 #   ./dex-probe.sh watch                follow the probe log
 #   ./dex-probe.sh save [file]          dump the log buffer to a file
 #   ./dex-probe.sh bigbuffer            raise the logcat buffer to 64M
+#   ./dex-probe.sh unlock <spec|off>    drop capping votes this session
+#   ./dex-probe.sh persist <spec>       same, applied at every boot
 #
 # Everything here is read-only with respect to the device.
 
@@ -50,6 +52,21 @@ case "$cmd" in
         setprop "$PROP" "class $2"
         echo "signature dump of $2 requested"
         ;;
+    unlock)
+        if [ $# -lt 2 ]; then
+            echo "usage: $0 unlock <display:priority,...|off>" >&2
+            echo "   eg: $0 unlock -1:19            drop the global 60Hz cap" >&2
+            echo "       $0 unlock '-1:19,*:10,*:13'  aim for 144Hz" >&2
+            exit 2
+        fi
+        setprop "$PROP" "unlock $2 $(date +%s)"
+        echo "unlock '$2' requested"
+        ;;
+    persist)
+        # Survives reboots, unlike the session-only unlock above.
+        setprop persist.dexrr.unlock "${2:-}"
+        echo "persist.dexrr.unlock = '${2:-}'"
+        ;;
     watch)
         exec logcat -s "$TAG":V
         ;;
@@ -64,6 +81,6 @@ case "$cmd" in
         logcat -G 64M && echo "logcat buffer raised to 64M (resets on reboot)"
         ;;
     *)
-        sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
         ;;
 esac

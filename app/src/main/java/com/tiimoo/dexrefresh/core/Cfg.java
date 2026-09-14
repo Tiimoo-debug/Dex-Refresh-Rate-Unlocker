@@ -33,6 +33,14 @@ public final class Cfg {
      */
     public static final String PROP_CMD = "debug.dexrr.cmd";
 
+    /**
+     * Durable unlock selection, applied at boot. Survives reboots, which the
+     * in-memory selection deliberately does not.
+     *
+     *   su -c 'setprop persist.dexrr.unlock "-1:19,*:10,*:13"'
+     */
+    public static final String PROP_PERSIST_UNLOCK = "persist.dexrr.unlock";
+
     /** How often the command property is polled. */
     public static final long CMD_POLL_MS = 2000L;
 
