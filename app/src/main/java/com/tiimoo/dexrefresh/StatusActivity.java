@@ -155,6 +155,28 @@ public class StatusActivity extends Activity {
             }
         }));
 
+        root.addView(heading("Who files a vote?"));
+        root.addView(body("Another display module (DispUnlock) has been active "
+                + "for every measurement so far, so a vote in the table is not "
+                + "necessarily Samsung's. Trace a priority, then re-plug the "
+                + "display, and the caller stack names whoever filed it."));
+        root.addView(button("Trace priority 5 (the 120 Hz render floor)",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        run("setprop " + Cfg.PROP_CMD + " \"trace 5 " + stamp() + "\"",
+                                "Tracing priority 5. Re-plug the display, then "
+                                        + "read the reports.");
+                    }
+                }));
+        root.addView(button("Stop tracing", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                run("setprop " + Cfg.PROP_CMD + " \"trace off " + stamp() + "\"",
+                        "Tracing off.");
+            }
+        }));
+
         root.addView(heading("Display connection"));
         root.addView(body("Plug or unplug the dock, then tap this. It shows "
                 + "whether Android saw a display device appear at all — which "

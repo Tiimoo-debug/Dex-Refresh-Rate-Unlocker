@@ -488,7 +488,7 @@ public final class DisplayHooks {
         // and a boolean vote object does not say who filed it. Traced only for
         // global votes and for votes that actually cap physical refresh below
         // 120, so this stays quiet on the per-frame traffic.
-        if (vote != null && shouldTraceVote(displayId, vote)
+        if (vote != null && shouldTraceVote(displayId, priority, vote)
                 && Throttle.allow("votetrace:" + displayId + ":" + priority, 6,
                         Cfg.RATE_LIMIT_WINDOW_MS)) {
             ProbeLog.post("   ^ filed by:");
@@ -536,7 +536,41 @@ public final class DisplayHooks {
         return args.length < 2 || !(args[0] instanceof Integer) || !(args[1] instanceof Integer);
     }
 
-    private static boolean shouldTraceVote(int displayId, Object vote) {
+    /**
+     * Priorities the user has asked to have attributed, via "trace <priority>".
+     *
+     * <p>Every measurement in this project was taken with another display
+     * module (DispUnlock) also active, so the vote table is not necessarily
+     * stock Samsung - some entries may belong to that module. A caller stack
+     * settles ownership immediately: a vote filed by another Xposed module
+     * shows that module's own classes in the stack, a vote filed by the
+     * framework shows framework classes.
+     */
+    private static final java.util.Set<Integer> TRACED_PRIORITIES =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<Integer>());
+
+    /** @param spec comma-separated priorities, or "off" */
+    public static void configureTracing(String spec) {
+        TRACED_PRIORITIES.clear();
+        if (spec == null || spec.isEmpty() || "off".equalsIgnoreCase(spec.trim())) {
+            ProbeLog.post("vote tracing off");
+            return;
+        }
+        for (String part : spec.split(",")) {
+            try {
+                TRACED_PRIORITIES.add(Integer.valueOf(Integer.parseInt(part.trim())));
+            } catch (NumberFormatException e) {
+                ProbeLog.post("trace: '%s' is not a priority", part.trim());
+            }
+        }
+        ProbeLog.post("vote tracing on for priorities %s - re-plug the display or "
+                + "toggle the screen to make them be re-filed", TRACED_PRIORITIES);
+    }
+
+    private static boolean shouldTraceVote(int displayId, int priority, Object vote) {
+        if (TRACED_PRIORITIES.contains(Integer.valueOf(priority))) {
+            return true;
+        }
         if (displayId == GLOBAL_DISPLAY_ID) {
             return true;
         }

@@ -475,6 +475,47 @@ su -c 'setprop persist.dexrr.unlock "-1:19,-1:11,*:10,*:13"'
 
 Read and applied at boot. `setprop persist.dexrr.unlock ""` stops it.
 
+## A confounder that applies to everything above
+
+**DispUnlock has been enabled on this device for every measurement in this
+document**, from before this module existed. So the vote table analysed
+throughout is not stock Samsung — it is Samsung *plus another display module*,
+and some entries may belong to that module rather than the vendor.
+
+One entry looks like a module's work in hindsight:
+
+```
+p5 = RenderVote(120, inf)      on display 0, on "Desktop", and on the HDMI display
+```
+
+That is a render-rate **floor** of 120 — "never go below 120" — present on every
+display including the phone panel. A floor is not what a vendor files to cap
+something; it is what a module files to *force* high refresh. It has been
+described as "harmless, keep it" throughout this document on the assumption it
+was Samsung's. That assumption was never checked.
+
+If it is DispUnlock's, it also suggests a cleaner explanation for the dock going
+black than the one offered below:
+
+- the unlock removes the ceilings and the mode pinning
+- DispUnlock holds a 120 Hz floor
+- a link that cannot reach 120 then has **no satisfiable mode at all**, so
+  nothing comes up rather than falling back to 60
+
+Also unknown: whether stock exposes 144 Hz modes for the external display at
+all, or whether DispUnlock is what makes them visible. If the latter, "the
+monitor advertises 144" is a fact about DispUnlock, not about the monitor.
+
+### Attributing a vote
+
+`trace <priority>` turns on caller-stack logging for that priority; re-plug the
+display so the vote is re-filed, then read the reports. A vote filed by another
+Xposed module shows that module's own classes in the stack; one filed by the
+framework shows framework classes. There is a button for priority 5.
+
+The full picture needs one more comparison: the vote table with DispUnlock
+**disabled**, which separates Samsung's votes from the module's for good.
+
 ## Dock regression — read this before enabling the unlock
 
 After `-1:19,-1:11,*:10,*:13` was set as a persisted unlock, a USB-C dock that

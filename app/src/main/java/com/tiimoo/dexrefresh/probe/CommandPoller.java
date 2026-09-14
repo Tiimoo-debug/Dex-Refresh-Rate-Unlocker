@@ -3,6 +3,7 @@ package com.tiimoo.dexrefresh.probe;
 import com.tiimoo.dexrefresh.core.Cfg;
 import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
+import com.tiimoo.dexrefresh.hooks.DisplayHooks;
 import com.tiimoo.dexrefresh.hooks.HookEngine;
 
 import java.lang.reflect.Method;
@@ -138,6 +139,10 @@ public final class CommandPoller {
                     }
                 }
             });
+            return;
+        }
+        if ("trace".equals(verb)) {
+            DisplayHooks.configureTracing(parts.length > 1 ? parts[1] : "off");
             return;
         }
         if ("verbose".equals(verb)) {
