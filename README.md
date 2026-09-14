@@ -181,6 +181,17 @@ so nothing can distinguish a thermal-throttling vote from a DeX one by name, and
 a blanket rule would silently disable thermal protection. See
 [docs/FINDINGS.md](docs/FINDINGS.md).
 
+## Known risk: docks and link bandwidth
+
+Dropping the 120 Hz caps also removes `DisableRefreshRateSwitchingVote`, which
+pins a display to one mode. On a bandwidth-limited connection — a dock running
+ethernet usually leaves DisplayPort two lanes instead of four — that can leave
+the framework requesting a mode the link cannot carry, and a DP link that fails
+to train gives **no picture at all** while power and ethernet keep working.
+
+If a dock stops showing a display, turn the unlock off first. See
+[docs/FINDINGS.md](docs/FINDINGS.md#dock-regression--read-this-before-enabling-the-unlock).
+
 ## Safety notes
 
 Hooking `system_server` can brick a boot. What this module does about that:

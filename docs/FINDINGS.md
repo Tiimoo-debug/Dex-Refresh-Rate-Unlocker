@@ -475,6 +475,51 @@ su -c 'setprop persist.dexrr.unlock "-1:19,-1:11,*:10,*:13"'
 
 Read and applied at boot. `setprop persist.dexrr.unlock ""` stops it.
 
+## Dock regression — read this before enabling the unlock
+
+After `-1:19,-1:11,*:10,*:13` was set as a persisted unlock, a USB-C dock that
+had previously worked stopped bringing up its display, while power delivery and
+ethernet kept working. A direct USB-C cable to the same monitor still worked.
+
+**Suspect the unlock first.** Those entries remove two things, not one:
+
+```
+-1:11  CombinedVote[PhysicalVote(10,120) DisableRefreshRateSwitchingVote]
+*:10   CombinedVote[PhysicalVote(0,120)  DisableRefreshRateSwitchingVote]
+```
+
+the 120 Hz ceiling **and** `DisableRefreshRateSwitchingVote`, which pins a
+display to a single mode.
+
+Bandwidth is the likely mechanism. A direct cable gives DisplayPort four lanes;
+a dock running USB 3 for ethernet typically leaves DP two lanes, roughly halving
+available bandwidth. With the ceiling gone the framework may request a mode the
+link cannot carry, and with switching re-enabled it may try to change into one.
+A DP link that fails to train produces no picture while power and ethernet
+continue working — exactly the symptom.
+
+Which raises a real possibility worth stating plainly: **the 120 Hz cap may not
+be arbitrary.** It may be Samsung sizing mode selection to the link actually
+negotiated. If so, 144 Hz is reachable on a 4-lane direct connection and not
+through a 2-lane dock, and no software change alters that.
+
+### Deciding it
+
+1. Turn the unlock off (app → *Turn unlock off*, or
+   `setprop persist.dexrr.unlock ""`), reboot, try the dock.
+   - Dock works again → the unlock caused it.
+   - Dock still dead → not this module; the earlier working state is restored
+     either way.
+2. With the unlock off, plug the dock and check **Show display connect/disconnect
+   events** in the app.
+   - No `DISPLAY-EVENT` at all → Android never saw a display. The link never came
+     up, and nothing in software is involved.
+   - A device appears and then goes → the framework rejected it, and the mode
+     list recorded for it is the next thing to read.
+3. Compare the monitor's advertised mode list through the dock against the direct
+   cable (`why` prints it with resolutions). If the 144 entry is absent through
+   the dock, that is the bandwidth answer, measured rather than assumed.
+
 ## Open question after run 3
 
 Answered by run 3: the framework does expose 144 Hz for the monitor, and a

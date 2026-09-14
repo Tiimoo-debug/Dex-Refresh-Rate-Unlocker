@@ -864,8 +864,14 @@ public final class DisplayHooks {
                                     captureDisplayInfo(a);
                                 }
                             }
-                            ProbeLog.post("DISPLAY-EVENT %s(%s)%s", name,
-                                    describeAll(param.args), identifyDevices(param.args));
+                            // Also to the report tag: whether a display was
+                            // even detected is the first question when a dock
+                            // shows power and ethernet but no picture, and it
+                            // must be answerable without turning on the
+                            // per-call firehose.
+                            ProbeLog.postReport(String.format(java.util.Locale.US,
+                                    "DISPLAY-EVENT %s(%s)%s", name,
+                                    describeAll(param.args), identifyDevices(param.args)));
                             Snapshots.requestDeferred("display-event:" + name);
                         } catch (Throwable t) {
                             HookEngine.reportOnce("lifecycle:" + name, t);

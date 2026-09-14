@@ -141,6 +141,34 @@ public class StatusActivity extends Activity {
             }
         }));
 
+        root.addView(heading("Display connection"));
+        root.addView(body("Plug or unplug the dock, then tap this. It shows "
+                + "whether Android saw a display device appear at all — which "
+                + "separates a link or dock problem from anything this module "
+                + "or DeX is doing."));
+        root.addView(button("Show display connect/disconnect events",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        setOutput("Reading\u2026");
+                        Root.run("logcat -d -s " + Cfg.TAG_REPORT
+                                        + ":V | grep DISPLAY-EVENT | tail -n 40",
+                                new Root.Callback() {
+                                    @Override
+                                    public void onResult(boolean ok, String out) {
+                                        setOutput(out.trim().isEmpty()
+                                                ? "No display events in the log.\n\n"
+                                                        + "If you just plugged the dock and "
+                                                        + "nothing appears here, Android never "
+                                                        + "saw a display - the link never came "
+                                                        + "up, so no software setting is "
+                                                        + "involved."
+                                                : out);
+                                    }
+                                });
+                    }
+                }));
+
         root.addView(heading("Output"));
         output = mono("");
         root.addView(output);
