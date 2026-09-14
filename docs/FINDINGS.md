@@ -755,3 +755,119 @@ against stand-ins shaped like the framework's vote classes — same field names,
 same nesting, same interface relationship. That the stand-ins are not the
 framework's own classes is the point: the reflection cannot tell, which is the
 property that has to hold on a firmware where R8 has renamed the originals.
+
+## A third module in the stack: MultiStar
+
+MultiStar's **Enable higher resolutions** toggle has been on since before this
+module existed, and toggling it changes the rate directly: **off → 60 Hz, on →
+144 Hz, in DeX**. So it is not a passive setting sitting beside the vote table;
+it is doing something the vote table (or the mode list) reflects.
+
+That makes three things other than Samsung changing refresh behaviour on this
+device, all of them active for every measurement recorded above:
+
+| | active since | what it does |
+| --- | --- | --- |
+| DispUnlock | before this project | unknown; `p5 = RenderVote(120, inf)` is the suspect |
+| MultiStar higher resolutions | before this project | 60 ↔ 144 in DeX, directly |
+| this module | run 4 onward | drops named votes |
+
+Nothing in `FINDINGS.md` distinguishes their contributions. Every vote called
+"Samsung's" so far might belong to any of the three.
+
+### This is now cheap to settle
+
+Each has a switch, and flipping one is not a reboot. The `capture` / `diff`
+commands do the comparison on the device:
+
+```
+capture before   →   flip exactly one switch   →   capture after   →   diff
+```
+
+The result names what that switch did, and nothing else. Three taps in the app.
+Run it once per module and the attribution problem is closed — including the
+question of whether MultiStar is what puts 144 Hz modes in the list at all, in
+which case "the monitor advertises 144" is a fact about MultiStar rather than
+about the monitor.
+
+A diff that comes back empty is itself an answer: the switch does not reach the
+vote table, so it works somewhere else — a system property, a `Settings` key, or
+the display driver.
+
+## One UI 5.1, for comparison
+
+With **only** MultiStar's toggle and no other mods, on One UI 5.1:
+
+- 144 Hz on the external display required **the phone's screen to be off**
+- phone screen on while in DeX → **60 Hz on both**
+- performance was reported as genuinely fast, not merely high-numbered
+
+Two things follow. First, that One UI 5.1 behaviour is a *policy* shape, not a
+hardware one — a budget shared between the internal panel and the external
+output, expressed as "you may have one of them fast". A cable's bandwidth does
+not care whether the phone's own panel is lit.
+
+Second, One UI 7 with this module already beats it: **120 Hz on both panels at
+once**, which One UI 5.1 never did. Confirmed with GL gears, which had never
+gone above 60 fps in DeX on One UI 7 before.
+
+### Other modes on One UI 7, same cable, no dock
+
+| mode | external | phone |
+| --- | --- | --- |
+| Samsung DeX (stock) | 60 | 60 |
+| Samsung DeX (this module, `unlock -1:19`) | 120 | 120 |
+| AOSP desktop mode | 120 or 144 | 120 |
+| screen mirroring | 120 | 120 |
+
+AOSP desktop mode reaching 144 while DeX does not is worth more than it looks:
+same cable, same monitor, same session, and one of them gets the fast mode. The
+limit is in DeX's policy, not in the link — the same conclusion the mirroring
+comparison gives, from a second direction.
+
+## What this module cannot reach
+
+Two things the user has asked about are genuinely outside an Xposed module
+scoped to `system_server`, and it is worth writing down why rather than
+attempting them badly.
+
+### USB-C lane allocation (display bandwidth vs. everything else on a dock)
+
+A USB-C port carrying DisplayPort Alt Mode splits its four high-speed lanes one
+of two ways, chosen during the Type-C Discover Modes / Enter Mode / DP Configure
+exchange:
+
+| pin assignment | DP lanes | USB 3.x |
+| --- | --- | --- |
+| C / E | 4 | no (USB 2 only) |
+| D / F | 2 | yes |
+
+A dock offering ethernet and an SSD needs USB 3, so it negotiates D — two DP
+lanes, half the display bandwidth. That is the trade-off, and it is settled by
+the PD controller and the kernel's Type-C alt-mode driver before Android's
+display stack sees anything at all. `system_server` does not participate, so no
+hook placed there can change it. Mainline exposes a writable
+`/sys/class/typec/port0-partner/pin_assignment`; whether Samsung's stack does is
+unknown and worth checking, but it is a root-shell or kernel matter, not this
+module's.
+
+This also gives a cleaner reading of the dock behaviour than the withdrawn
+bandwidth theory did: not "the dock is weak", but "the dock asked for USB 3, so
+the display got two lanes".
+
+### The DeX performance cap
+
+"144 Hz but sluggish" has two possible causes and they need telling apart
+before anything is built:
+
+1. **The render rate is low.** The panel scans at 144 while content is produced
+   at 60. This is in the vote table, it is measurable since the render-rate
+   work above, and it is fixable here.
+2. **Frames are produced slowly.** GPU/CPU clocks, thermal governor, DeX's own
+   policy. Nothing to do with refresh rate, not in the vote table, and not
+   reachable from these hooks — Samsung's thermal and DVFS limits live in the
+   power HAL, `sdhms`, and the kernel's GPU governor.
+
+`why` now distinguishes them, so this is a measurement rather than a guess.
+Chasing (2) before reading the "content produced at" line would be building
+against an unverified premise, which this project has already done once.

@@ -141,6 +141,27 @@ public final class CommandPoller {
             });
             return;
         }
+        if ("capture".equals(verb)) {
+            final String label = parts.length > 1 ? parts[1] : "cap" + System.currentTimeMillis();
+            Snapshots.runLater(0, new Runnable() {
+                @Override
+                public void run() {
+                    Compare.capture(label);
+                }
+            });
+            return;
+        }
+        if ("diff".equals(verb)) {
+            final String from = parts.length > 2 ? parts[1] : null;
+            final String to = parts.length > 2 ? parts[2] : null;
+            Snapshots.runLater(0, new Runnable() {
+                @Override
+                public void run() {
+                    Compare.diff(from, to);
+                }
+            });
+            return;
+        }
         if ("trace".equals(verb)) {
             DisplayHooks.configureTracing(parts.length > 1 ? parts[1] : "off");
             return;

@@ -155,6 +155,36 @@ public class StatusActivity extends Activity {
             }
         }));
 
+        root.addView(heading("Compare before and after"));
+        root.addView(body("Several things on this phone change the refresh "
+                + "rate and none of them have been told apart: Samsung's own "
+                + "policy, DispUnlock, MultiStar's higher-resolutions toggle, "
+                + "and this module. Each has a switch. Capture, flip one "
+                + "switch, capture again, and the comparison names exactly "
+                + "what that switch did \u2014 no reboot and no shell."));
+        root.addView(button("1. Capture \u2018before\u2019", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                run("setprop " + Cfg.PROP_CMD + " \"capture before " + stamp() + "\"",
+                        "Captured 'before'. Now flip one switch \u2014 one only "
+                                + "\u2014 and capture 'after'.");
+            }
+        }));
+        root.addView(button("2. Capture \u2018after\u2019", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                run("setprop " + Cfg.PROP_CMD + " \"capture after " + stamp() + "\"",
+                        "Captured 'after'. Now compare.");
+            }
+        }));
+        root.addView(button("3. Compare them", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                runThenShowReport("setprop " + Cfg.PROP_CMD
+                        + " \"diff before after " + stamp() + "\"");
+            }
+        }));
+
         root.addView(heading("Who files a vote?"));
         root.addView(body("Another display module (DispUnlock) has been active "
                 + "for every measurement so far, so a vote in the table is not "

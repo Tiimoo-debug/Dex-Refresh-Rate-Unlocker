@@ -201,6 +201,44 @@ the answer is only in the log.
 `persist.dexrr.unlock` is polled, not only read at boot, so setting it takes
 effect within a couple of seconds rather than at the next reboot.
 
+## 5b. Comparing before and after (`capture` / `diff`)
+
+Several things on this phone change the refresh rate — Samsung's own policy,
+DispUnlock, MultiStar's higher-resolutions toggle, this module — and a vote in
+the table does not say which of them filed it. Each has a switch, so flip one
+and look at what moved:
+
+```sh
+su -c 'setprop debug.dexrr.cmd "capture before $(date +%s)"'
+#   ... flip exactly one switch ...
+su -c 'setprop debug.dexrr.cmd "capture after $(date +%s)"'
+su -c 'setprop debug.dexrr.cmd "diff before after $(date +%s)"'
+su -c 'logcat -d -s DexRRReport:V'
+```
+
+`diff` with no labels compares the two most recent captures. Every snapshot also
+leaves a capture behind under its own label, so a snapshot taken before you
+thought to capture can still be compared afterwards. Eight captures are kept.
+
+The report lists only what moved:
+
+```
+===== 'before' -> 'after' =====
+  ~ modes:9  44@60 87@144  active=87  ->  44@60 87@144  active=44
+  ~ render:9  144.000Hz  ->  60.000Hz
+  + vote d-1 p19  CombinedVote[PhysicalVote(0,60)]
+  ~ vote d9 p10  PhysicalVote(0,144)  ->  PhysicalVote(0,60)
+```
+
+`+` appeared, `-` went away, `~` was rewritten. A vote that appears or tightens
+is what that switch did.
+
+An empty diff is an answer too: the switch does not reach the vote table, so it
+works somewhere else — a system property, a `Settings` key, or the driver.
+
+The app has this as three buttons under **Compare before and after**, which
+needs no shell at all.
+
 ## 6. Pull the full log
 
 ```sh

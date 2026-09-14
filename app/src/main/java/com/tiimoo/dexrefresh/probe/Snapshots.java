@@ -167,6 +167,9 @@ public final class Snapshots {
 
         sb.append("========== END SNAPSHOT #").append(n).append(" ==========");
         ProbeLog.postReport(sb.toString());
+        // Leave a capture behind under the same label, so a snapshot taken
+        // before remembering to capture can still be diffed afterwards.
+        Compare.capture(label);
     }
 
     private interface Section {
@@ -324,14 +327,8 @@ public final class Snapshots {
      *
      * <p>This is the payload of the whole exercise. Diff the DeX-on snapshot
      * against the DeX-off one and the vote that appears (or tightens) is the
-     * thing capping the panel.
-     */
-    /**
-     * Render the live vote table: display id -> priority -> vote.
-     *
-     * <p>This is the payload of the whole exercise. Diff the DeX-on snapshot
-     * against the DeX-off one and the vote that appears (or tightens) is the
-     * thing capping the panel.
+     * thing capping the panel — or use the "capture"/"diff" commands, which do
+     * that comparison on the device instead of by eye.
      */
     private static String dumpVotes(int depth) {
         SparseArray<?> outer = Votes.byDisplay();
