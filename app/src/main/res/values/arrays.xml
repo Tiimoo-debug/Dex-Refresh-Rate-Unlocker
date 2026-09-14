@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Default LSPosed scope: system_server only.
+
+      The DeX packages are deliberately NOT listed here. If the system_server
+      probe shows the cap is applied app-side rather than in the framework, add
+      them manually in the LSPosed UI:
+        com.sec.android.desktopmode.uiservice
+        com.sec.android.app.dexsystemui
+        com.sec.android.app.desktoplauncher
+      DexAppHooks activates automatically for those packages when scoped.
+    -->
+    <string-array name="xposed_scope">
+        <item>android</item>
+    </string-array>
+</resources>

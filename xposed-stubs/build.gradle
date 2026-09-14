@@ -1,0 +1,19 @@
+// Compile-only stubs for the classic Xposed API (de.robv.android.xposed.*).
+//
+// They exist so the module builds without pulling the Xposed API artifact from
+// api.xposed.info / JitPack. They are NEVER packaged: the app module depends on
+// this project with `compileOnly`, so at runtime the real implementations
+// provided by LSPosed are used.
+//
+// IMPORTANT: every signature here must match the real Xposed API exactly
+// (including return types). Java call sites encode the full descriptor, so a
+// stub that returns `void` where the real API returns `Unhook` would compile
+// fine and then blow up at runtime with NoSuchMethodError.
+plugins {
+    id 'java-library'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}

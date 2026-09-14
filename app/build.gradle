@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.tiimoo.dexrefresh'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.tiimoo.dexrefresh'
+        // The target device is a Galaxy S22 Ultra on One UI 7 / Android 14 (API 34).
+        minSdk 31
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0-probe'
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+            // Sign release with the debug key so `assembleRelease` also produces
+            // something LSPosed can install without extra keystore setup.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    // compileOnly: the stubs must never be packaged, LSPosed supplies the real
+    // de.robv.android.xposed.* classes at runtime.
+    compileOnly project(':xposed-stubs')
+}
