@@ -53,6 +53,15 @@ public final class Cfg {
      */
     public static final String PROP_PERSIST_UNLOCK = "persist.dexrr.unlock";
 
+    /**
+     * Compact live state, published by the module for the control panel to read.
+     *
+     * <p>An app can read a debug.* property without root, so the panel can show
+     * current state without a su round-trip. Property values are limited to
+     * around 92 bytes, so this is kept terse and truncated.
+     */
+    public static final String PROP_STATE = "debug.dexrr.state";
+
     /** How often the command property is polled. */
     public static final long CMD_POLL_MS = 2000L;
 

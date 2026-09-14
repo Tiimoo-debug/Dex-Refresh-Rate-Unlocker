@@ -88,7 +88,21 @@ so nothing is fetched from `api.xposed.info`.
 Disable it independently at any time from the LSPosed UI; it shares no state
 with other modules.
 
-## Using it
+## Using it — the app
+
+Open **DeX Refresh Probe** from the launcher. Everything the module does is a
+button: enable auto unlock, turn it off, apply a custom spec, run the `why`
+diagnosis, take a snapshot, scan classes, and read the reports back — with the
+result shown in the app and a copy button.
+
+It shells out through `su` to set the properties the hook polls, so Magisk will
+ask for root once. Current state (per-display active/max Hz, and whether the
+unlock is on) is read from a property with no root needed, so the status panel
+works even if you decline.
+
+The shell route below still works and is what the app drives underneath.
+
+## Using it — the shell
 
 Full workflow in **[docs/USAGE.md](docs/USAGE.md)**. The short version, from a
 Termux root shell — no ADB needed:

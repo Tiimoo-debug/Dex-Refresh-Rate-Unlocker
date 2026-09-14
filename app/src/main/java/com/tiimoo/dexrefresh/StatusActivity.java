@@ -5,35 +5,42 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.text.InputType;
 import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.tiimoo.dexrefresh.core.Cfg;
+import com.tiimoo.dexrefresh.ui.Root;
 
 import java.lang.reflect.Method;
 
 /**
- * On-device cheat sheet.
+ * On-device control panel.
+ *
+ * <p>Everything this module can do was previously a shell command typed into
+ * Termux, and that friction cost real time: a silent setprop, a command that
+ * only fires when the property value changes, a cache-busting timestamp parsed
+ * as an argument, and reports buried under sixty log lines a second. All of
+ * that is handled here instead.
  *
  * <p>Runs in the module's own process, where the Xposed classes do not exist,
- * so nothing here may touch {@code de.robv.android.xposed.*} - not even
- * indirectly through {@code ProbeLog}.
+ * so nothing here may touch {@code de.robv.android.xposed.*} — not even
+ * indirectly through ProbeLog. Commands reach the hook by way of {@code su}
+ * setting the property the module polls.
  */
 public class StatusActivity extends Activity {
 
-    private static final String SNAPSHOT_CMD =
-            "su -c 'am broadcast -a " + Cfg.ACTION_SNAPSHOT + " --es label LABEL'";
-    private static final String SCOUT_CMD =
-            "su -c 'am broadcast -a " + Cfg.ACTION_SCOUT + " --ez scan true'";
-    private static final String LOGCAT_CMD =
-            "su -c 'logcat -s " + Cfg.TAG + ":V'";
+    private TextView status;
+    private TextView output;
+    private EditText customSpec;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,46 +52,194 @@ public class StatusActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         root.addView(heading("DeX Refresh Probe " + BuildConfig.VERSION_NAME));
-        root.addView(body("Observation only. This build makes no changes to the "
-                + "refresh rate; it records how the system chooses one."));
-        root.addView(heading("Status"));
-        root.addView(body(statusText()));
-        root.addView(heading("1. Capture a baseline (phone idle, no DeX)"));
-        root.addView(mono(SNAPSHOT_CMD.replace("LABEL", "dex-off")));
-        root.addView(heading("2. Start DeX, then capture again"));
-        root.addView(mono(SNAPSHOT_CMD.replace("LABEL", "dex-on")));
-        root.addView(heading("3. Read the log"));
-        root.addView(mono(LOGCAT_CMD));
-        root.addView(body("The LSPosed app shows the same output under "
-                + "Logs → Modules, if you would rather not use a shell."));
-        root.addView(heading("Optional: class/field discovery"));
-        root.addView(mono(SCOUT_CMD));
-        root.addView(body("Diff the two snapshots. The vote that appears or "
-                + "tightens between them is what caps the panel."));
 
-        root.addView(copyButton("Copy snapshot commands",
-                SNAPSHOT_CMD.replace("LABEL", "dex-off") + "\n"
-                        + SNAPSHOT_CMD.replace("LABEL", "dex-on") + "\n"
-                        + LOGCAT_CMD));
+        status = mono("(reading state…)");
+        root.addView(status);
+        root.addView(button("Refresh status", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                refreshStatus();
+            }
+        }));
+
+        root.addView(heading("Unlock"));
+        root.addView(body("Auto works out which votes hold each display below "
+                + "the fastest mode it advertises, and drops exactly those. It "
+                + "re-checks continuously, so redocks and reboots keep working."));
+        root.addView(button("Enable auto (persists across reboots)",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        run("setprop " + Cfg.PROP_PERSIST_UNLOCK + " auto",
+                                "Auto unlock enabled.");
+                    }
+                }));
+        root.addView(button("Turn unlock off", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                run("setprop " + Cfg.PROP_PERSIST_UNLOCK + " '' ; setprop "
+                                + Cfg.PROP_CMD + " \"unlock off " + stamp() + "\"",
+                        "Unlock disabled.");
+            }
+        }));
+
+        customSpec = new EditText(this);
+        customSpec.setHint("or a custom spec, e.g. -1:19,*:10");
+        customSpec.setInputType(InputType.TYPE_CLASS_TEXT);
+        customSpec.setSingleLine(true);
+        root.addView(customSpec);
+        root.addView(button("Apply custom spec", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String spec = customSpec.getText().toString().trim();
+                if (spec.isEmpty()) {
+                    toast("Enter a spec first, or use Auto.");
+                    return;
+                }
+                run("setprop " + Cfg.PROP_CMD + " \"unlock " + spec + " "
+                                + stamp() + "\"", "Applied: " + spec);
+            }
+        }));
+
+        root.addView(heading("Diagnose"));
+        root.addView(button("Why is it not at maximum?", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                runThenShowReport("setprop " + Cfg.PROP_CMD + " \"why " + stamp() + "\"");
+            }
+        }));
+        root.addView(button("Full snapshot", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                runThenShowReport("setprop " + Cfg.PROP_CMD
+                        + " \"snapshot panel " + stamp() + "\"");
+            }
+        }));
+        root.addView(button("Class / field scan", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                runThenShowReport("setprop " + Cfg.PROP_CMD + " \"scout " + stamp() + "\"");
+            }
+        }));
+        root.addView(button("Show latest reports", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showReport();
+            }
+        }));
+
+        root.addView(heading("Output"));
+        output = mono("");
+        root.addView(output);
+        root.addView(button("Copy output", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                copy(output.getText().toString());
+            }
+        }));
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
+
+        refreshStatus();
     }
 
-    private String statusText() {
-        String value = systemProperty(Cfg.PROP_ACTIVE);
-        if (value == null) {
-            return "Could not read " + Cfg.PROP_ACTIVE + ".\n"
-                    + "This says nothing either way — confirm in LSPosed's log instead.";
+    // ------------------------------------------------------------------
+    // Actions
+    // ------------------------------------------------------------------
+
+    /**
+     * The module only acts when the command property's value *changes*, so
+     * every command carries a unique suffix.
+     *
+     * <p>Generated here rather than in the shell: Android's date applet does
+     * not reliably support sub-second formats, and a plain seconds value would
+     * repeat if two buttons were tapped within the same second, silently doing
+     * nothing the second time. The module strips a trailing all-digit token
+     * before parsing, so this never reaches a command's arguments.
+     */
+    private static String stamp() {
+        return Long.toString(System.nanoTime());
+    }
+
+    private void run(String command, final String successMessage) {
+        setOutput("Running…");
+        Root.run(command, new Root.Callback() {
+            @Override
+            public void onResult(boolean ok, String out) {
+                if (ok) {
+                    setOutput(successMessage);
+                    // The hook polls every couple of seconds; give it a moment
+                    // before reading back the state it publishes.
+                    status.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            refreshStatus();
+                        }
+                    }, 3000L);
+                } else {
+                    setOutput("Failed.\n\n" + out);
+                }
+            }
+        });
+    }
+
+    private void runThenShowReport(String command) {
+        setOutput("Running…");
+        // One root session: fire the command, wait for the poller, then read
+        // back only the report tag. Deliberately does NOT clear the log buffer
+        // - that would also destroy the STATE history, which is the part worth
+        // keeping. Reports are low volume on their own tag, so a tail is clean.
+        Root.run(command + "; sleep 5; logcat -d -s " + Cfg.TAG_REPORT
+                        + ":V | tail -n 200",
+                new Root.Callback() {
+                    @Override
+                    public void onResult(boolean ok, String out) {
+                        setOutput(out.trim().isEmpty()
+                                ? "No report was produced. Is the module enabled for "
+                                        + "System Framework in LSPosed, and rebooted?"
+                                : out);
+                    }
+                });
+    }
+
+    private void showReport() {
+        setOutput("Reading…");
+        Root.run("logcat -d -s " + Cfg.TAG_REPORT + ":V | tail -n 200",
+                new Root.Callback() {
+            @Override
+            public void onResult(boolean ok, String out) {
+                setOutput(out.trim().isEmpty() ? "No reports in the log buffer yet." : out);
+            }
+        });
+    }
+
+    private void refreshStatus() {
+        String state = systemProperty(Cfg.PROP_STATE);
+        String persisted = systemProperty(Cfg.PROP_PERSIST_UNLOCK);
+        StringBuilder sb = new StringBuilder();
+        if (state == null || state.isEmpty()) {
+            sb.append("Module state: not detected.\n")
+                    .append("Either it is not enabled for System Framework in\n")
+                    .append("LSPosed (then rebooted), or this firmware refuses\n")
+                    .append("the status property. Check LSPosed → Logs.");
+        } else {
+            sb.append("unlock=").append(firstToken(state)).append('\n');
+            String rest = state.substring(firstToken(state).length()).trim();
+            if (!rest.isEmpty()) {
+                sb.append("displays (active/max Hz):\n  ").append(rest.replace(" ", "\n  "));
+            }
         }
-        if (value.isEmpty()) {
-            return "Not detected as loaded.\n"
-                    + "Either the module is not enabled for 'System Framework' in "
-                    + "LSPosed (and rebooted), or this firmware refuses the status "
-                    + "property. Check LSPosed → Logs before assuming the worst.";
+        if (persisted != null && !persisted.isEmpty()) {
+            sb.append("\npersisted: ").append(persisted);
         }
-        return "Hook reported itself active in system_server at unix time " + value + ".";
+        status.setText(sb.toString());
+    }
+
+    private static String firstToken(String s) {
+        int space = s.indexOf(' ');
+        return space < 0 ? s : s.substring(0, space);
     }
 
     /** Read a system property without linking against the hidden API. */
@@ -99,27 +254,34 @@ public class StatusActivity extends Activity {
         }
     }
 
-    private Button copyButton(String label, final String payload) {
+    private void copy(String text) {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(ClipData.newPlainText(Cfg.TAG, text));
+            toast("Copied");
+        } catch (Throwable t) {
+            toast("Copy failed: " + t);
+        }
+    }
+
+    private void setOutput(String text) {
+        output.setText(text);
+    }
+
+    private void toast(String text) {
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+    }
+
+    // ------------------------------------------------------------------
+    // Views
+    // ------------------------------------------------------------------
+
+    private Button button(String label, View.OnClickListener listener) {
         Button b = new Button(this);
         b.setText(label);
-        b.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                try {
-                    ClipboardManager cm =
-                            (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    cm.setPrimaryClip(ClipData.newPlainText(Cfg.TAG, payload));
-                    Toast.makeText(StatusActivity.this, "Copied", Toast.LENGTH_SHORT).show();
-                } catch (Throwable t) {
-                    Toast.makeText(StatusActivity.this, "Copy failed: " + t,
-                            Toast.LENGTH_LONG).show();
-                }
-            }
-        });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(16);
-        b.setLayoutParams(lp);
+        b.setAllCaps(false);
+        b.setOnClickListener(listener);
+        b.setLayoutParams(rowParams(dp(8)));
         return b;
     }
 
@@ -127,40 +289,38 @@ public class StatusActivity extends Activity {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        tv.setTypeface(null, android.graphics.Typeface.BOLD);
-        tv.setGravity(Gravity.START);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(18);
-        tv.setLayoutParams(lp);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setLayoutParams(rowParams(dp(20)));
         return tv;
     }
 
     private TextView body(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
-        tv.setLayoutParams(lp);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tv.setLayoutParams(rowParams(dp(6)));
         return tv;
     }
 
     private TextView mono(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tv.setTypeface(Typeface.MONOSPACE);
         tv.setTextIsSelectable(true);
         tv.setBackgroundColor(Color.argb(28, 128, 128, 128));
         int p = dp(8);
         tv.setPadding(p, p, p, p);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
-        tv.setLayoutParams(lp);
+        tv.setLayoutParams(rowParams(dp(6)));
         return tv;
+    }
+
+    private LinearLayout.LayoutParams rowParams(int topMargin) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = topMargin;
+        return lp;
     }
 
     private int dp(int value) {

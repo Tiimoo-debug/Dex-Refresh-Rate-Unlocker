@@ -1,5 +1,16 @@
 # Using the probe
 
+## The app does all of this
+
+Open **DeX Refresh Probe** from the launcher — every command below is a button
+there, with the output shown in the app. It is the recommended route: it handles
+the command channel's quirks for you (a silent `setprop`, commands that only
+fire when the value *changes*, and reports that are impossible to find by
+tailing a log producing sixty lines a second).
+
+The shell instructions below are what the app runs underneath, kept for when a
+shell is more convenient.
+
 Everything here works from an on-device root shell (Termux). ADB is only
 suggested where it is genuinely the better tool — see the last section.
 

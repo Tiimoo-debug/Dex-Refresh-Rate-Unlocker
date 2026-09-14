@@ -206,7 +206,10 @@ public final class CommandPoller {
     }
 
     private static boolean looksLikeEpoch(String token) {
-        if (token.length() < 9 || token.length() > 13) {
+        // No upper bound on length: the control panel stamps commands with
+        // System.nanoTime(), which is 19 digits, and a shell caller might use
+        // anything. Nine or more digits is never a display id or a priority.
+        if (token.length() < 9) {
             return false;
         }
         for (int i = 0; i < token.length(); i++) {

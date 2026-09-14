@@ -92,6 +92,79 @@ public final class Heartbeat {
             lastForcedMs = now;
         }
         ProbeLog.post("STATE%s %s", changed ? "*" : " ", line);
+        publishState();
+    }
+
+    /**
+     * Publish a terse summary the control panel can read without root.
+     *
+     * <p>An app can read a debug.* property unprivileged, so the panel shows
+     * live state with no su round-trip. Property values cap out around 92
+     * bytes, so this is per-display "activeRate/maxRate" plus the unlock state,
+     * truncated hard.
+     */
+    private static void publishState() {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append(Unlock.isAuto() ? "auto" : Unlock.active() ? "on" : "off");
+            for (String key : new java.util.TreeSet<String>(ProbeState.LAST_SEEN.keySet())) {
+                if (!key.startsWith("modes:")) {
+                    continue;
+                }
+                String modes = ProbeState.LAST_SEEN.get(key);
+                if (modes == null) {
+                    continue;
+                }
+                sb.append(' ').append(key.substring("modes:".length())).append('=')
+                        .append(activeRate(modes)).append('/').append(maxRate(modes));
+            }
+            String value = sb.toString();
+            if (value.length() > 90) {
+                value = value.substring(0, 90);
+            }
+            Class<?> sp = Reflect.cls(ProbeState.systemServerClassLoader,
+                    "android.os.SystemProperties");
+            java.lang.reflect.Method set = sp == null ? null
+                    : Reflect.method(sp, "set", String.class, String.class);
+            if (set != null) {
+                set.invoke(null, Cfg.PROP_STATE, value);
+            }
+        } catch (Throwable ignored) {
+            // SELinux may refuse the write; the panel falls back to the log.
+        }
+    }
+
+    /** "1@120 3@60 active=3" -> "60" */
+    private static String activeRate(String modes) {
+        int at = modes.indexOf("active=");
+        if (at < 0) {
+            return "?";
+        }
+        String activeId = modes.substring(at + 7).trim();
+        for (String token : modes.split("\\s+")) {
+            String[] bits = token.split("@");
+            if (bits.length >= 2 && bits[0].equals(activeId)) {
+                return bits[1];
+            }
+        }
+        return "?";
+    }
+
+    /** "1@120 3@60 active=3" -> "120" */
+    private static String maxRate(String modes) {
+        int best = 0;
+        for (String token : modes.split("\\s+")) {
+            String[] bits = token.split("@");
+            if (bits.length < 2) {
+                continue;
+            }
+            try {
+                best = Math.max(best, Integer.parseInt(bits[1]));
+            } catch (NumberFormatException ignored) {
+                // not a mode token
+            }
+        }
+        return best == 0 ? "?" : String.valueOf(best);
     }
 
     /**
