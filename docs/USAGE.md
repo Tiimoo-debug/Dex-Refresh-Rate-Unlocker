@@ -118,6 +118,22 @@ For a quicker, less noisy capture of just the vote table:
 su -c 'setprop debug.dexrr.cmd "votes dex-on"'
 ```
 
+## 4b. Logging volume
+
+Per-call hook logging is **off by default**. It is a diagnostic tool, and while
+displays are active it produces roughly sixty log lines a second inside
+system_server — not something worth paying for on a daily driver. Turn it on
+only when investigating:
+
+```sh
+su -c 'setprop debug.dexrr.verbose 1'    # or the button in the app
+su -c 'setprop debug.dexrr.verbose 0'
+```
+
+Always logged regardless: vote changes, the `STATE` heartbeat, Samsung's
+`restrictHighRefreshRate`, and every report. Those are the signals that have
+actually mattered.
+
 ## 5. Reading reports (snapshots, `why`, class dumps)
 
 **Do not use `tail`.** While displays are active the probe emits roughly sixty

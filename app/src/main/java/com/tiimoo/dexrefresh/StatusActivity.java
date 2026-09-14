@@ -121,6 +121,19 @@ public class StatusActivity extends Activity {
                 runThenShowReport("setprop " + Cfg.PROP_CMD + " \"scout " + stamp() + "\"");
             }
         }));
+        root.addView(button("Verbose logging on (for diagnosis)",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        run("setprop " + Cfg.PROP_VERBOSE + " 1", "Verbose logging on.");
+                    }
+                }));
+        root.addView(button("Verbose logging off", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                run("setprop " + Cfg.PROP_VERBOSE + " 0", "Verbose logging off.");
+            }
+        }));
         root.addView(button("Show latest reports", new View.OnClickListener() {
             @Override
             public void onClick(View v) {

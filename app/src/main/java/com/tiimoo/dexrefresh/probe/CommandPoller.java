@@ -3,6 +3,7 @@ package com.tiimoo.dexrefresh.probe;
 import com.tiimoo.dexrefresh.core.Cfg;
 import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
+import com.tiimoo.dexrefresh.hooks.HookEngine;
 
 import java.lang.reflect.Method;
 import java.util.Locale;
@@ -66,19 +67,6 @@ public final class CommandPoller {
         }
         // Let the system finish booting before the first read.
         sleep(15000L);
-        // Second chance for the broadcast receiver. If onBootPhase never fired
-        // (which is what the first device run suggests) this is where it gets
-        // registered instead. Failure here is fine - the property channel below
-        // does not depend on it.
-        try {
-            ControlReceiver.register(ProbeState.systemContext);
-        } catch (Throwable t) {
-            ProbeLog.postThrowable("late receiver registration", t);
-        }
-        // A selection stored in persist.dexrr.unlock survives reboots, so the
-        // unlock can be a standing setting rather than something retyped after
-        // every boot.
-        // Read once here so a reboot restores the selection...
         while (true) {
             try {
                 Object raw = get.invoke(null, Cfg.PROP_CMD, "");
@@ -90,6 +78,9 @@ public final class CommandPoller {
                 }
                 // ...and poll it too, so setting it mid-session takes effect
                 // rather than silently waiting for the next boot.
+                Object verbose = get.invoke(null, Cfg.PROP_VERBOSE, "");
+                HookEngine.setVerbose(verbose instanceof String
+                        && ("1".equals(verbose) || "true".equalsIgnoreCase((String) verbose)));
                 Object persisted = get.invoke(null, Cfg.PROP_PERSIST_UNLOCK, "");
                 String persistedValue = persisted instanceof String
                         ? ((String) persisted).trim() : "";
@@ -149,6 +140,12 @@ public final class CommandPoller {
             });
             return;
         }
+        if ("verbose".equals(verb)) {
+            boolean on = parts.length > 1
+                    && ("on".equalsIgnoreCase(parts[1]) || "1".equals(parts[1]));
+            HookEngine.setVerbose(on);
+            return;
+        }
         if ("unlock".equals(verb)) {
             Unlock.configure(parts.length > 1 ? parts[1] : "off");
             return;
@@ -179,7 +176,7 @@ public final class CommandPoller {
             return;
         }
         ProbeLog.post("unknown command '%s' (try: snapshot <label> | votes | scout"
-                + " | class <fqcn> | why [displayId]"
+                + " | class <fqcn> | why [displayId] | verbose on|off"
                 + " | unlock <display:priority,...> | unlock off)", value);
     }
 

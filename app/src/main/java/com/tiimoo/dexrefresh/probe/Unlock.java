@@ -1,6 +1,7 @@
 package com.tiimoo.dexrefresh.probe;
 
 import com.tiimoo.dexrefresh.core.ProbeLog;
+import com.tiimoo.dexrefresh.core.Votes;
 
 import java.lang.reflect.Member;
 import java.util.Collections;
@@ -221,7 +222,7 @@ public final class Unlock {
             }
             String priority = entry.substring(2);
             out.add("-1:" + priority);
-            for (int displayId : Snapshots.knownDisplayIds()) {
+            for (int displayId : Votes.displayIds()) {
                 out.add(displayId + ":" + priority);
             }
         }

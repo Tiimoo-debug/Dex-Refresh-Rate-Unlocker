@@ -1,10 +1,8 @@
 package com.tiimoo.dexrefresh;
 
-import com.tiimoo.dexrefresh.core.Cfg;
 import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.hooks.DexAppHooks;
 import com.tiimoo.dexrefresh.hooks.DisplayHooks;
-import com.tiimoo.dexrefresh.probe.DeXState;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -40,7 +38,6 @@ public class ProbeModule implements IXposedHookLoadPackage {
                 }
                 ProbeLog.start();
                 ProbeLog.postNow(BANNER + " - attached to system_server");
-                DeXState.markActive(lpparam.classLoader, Cfg.PROP_ACTIVE);
                 DisplayHooks.install(lpparam.classLoader);
                 return;
             }

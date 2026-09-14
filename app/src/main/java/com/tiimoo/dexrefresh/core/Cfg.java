@@ -25,21 +25,17 @@ public final class Cfg {
 
     public static final String PKG = "com.tiimoo.dexrefresh";
 
-    /** Manually trigger a labelled snapshot (see docs/USAGE.md). */
-    public static final String ACTION_SNAPSHOT = PKG + ".ACTION_SNAPSHOT";
-    /** Dump class/field/method inventories for the display subsystem. */
-    public static final String ACTION_SCOUT = PKG + ".ACTION_SCOUT";
-
     /**
      * Property-based command channel, polled by {@link
      * com.tiimoo.dexrefresh.probe.CommandPoller}.
      *
-     * <p>This exists because the broadcast route proved unreliable in practice:
-     * `am broadcast` from a non-root Termux shell fails outright, and even from
-     * a root shell the receiver may never have registered. A property needs no
-     * Context, no boot phase and no receiver - system_server can always read
-     * one, and `setprop` on a debug.* key is always permitted from a root
-     * shell. Any change to the value triggers the command.
+     * <p>The command channel. A broadcast receiver was tried first and never
+     * worked on this device: `am broadcast` fails outright from a non-root
+     * shell, and from a root shell the receiver had never registered, so
+     * nothing fired. A property needs no Context, no boot phase and no
+     * receiver - system_server can always read one, and `setprop` on a debug.*
+     * key is always permitted from root. Any change to the value runs the
+     * command.
      *
      *   su -c 'setprop debug.dexrr.cmd "snapshot dex-off"'
      */
@@ -62,6 +58,20 @@ public final class Cfg {
      */
     public static final String PROP_STATE = "debug.dexrr.state";
 
+    /**
+     * Per-call hook logging, off by default.
+     *
+     * <p>The generic CALL/RET lines are a diagnostic tool, not something worth
+     * paying for every day: they run on every invocation of every hooked
+     * method inside system_server, and while displays are active they produce
+     * around sixty log lines a second. The signals that matter - vote changes,
+     * the state heartbeat, the Samsung restrictor, and every report - are
+     * unaffected by this and always logged.
+     *
+     *   su -c 'setprop debug.dexrr.verbose 1'
+     */
+    public static final String PROP_VERBOSE = "debug.dexrr.verbose";
+
     /** How often the command property is polled. */
     public static final long CMD_POLL_MS = 2000L;
 
@@ -75,13 +85,6 @@ public final class Cfg {
 
     /** Print an anchor line this often even when nothing changed. */
     public static final long HEARTBEAT_ANCHOR_MS = 60_000L;
-
-    /**
-     * Set by the hook once it is live inside system_server, so StatusActivity
-     * can tell you whether the module actually loaded. Best-effort: SELinux may
-     * refuse the write, in which case the status simply reads "unknown".
-     */
-    public static final String PROP_ACTIVE = "sys.dexrr.active";
 
     /**
      * Field/method names we consider interesting. This is the brute-force net:

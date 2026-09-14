@@ -46,6 +46,27 @@ public final class HookEngine {
     private static final ConcurrentHashMap<String, Boolean> ERRORS_REPORTED = new ConcurrentHashMap<>();
 
     /**
+     * Per-call logging, off by default. See {@link Cfg#PROP_VERBOSE}.
+     *
+     * <p>Checked before any string is built. That ordering is the point: the
+     * old code rendered every argument of every call just to decide whether the
+     * line had changed, which is work done on a system_server hot path for a
+     * line nobody was going to read.
+     */
+    private static volatile boolean verbose;
+
+    public static void setVerbose(boolean enabled) {
+        if (verbose != enabled) {
+            verbose = enabled;
+            ProbeLog.post("per-call hook logging %s", enabled ? "ON" : "off");
+        }
+    }
+
+    public static boolean isVerbose() {
+        return verbose;
+    }
+
+    /**
      * Hook every declared method of {@code className} matching {@code pattern}.
      *
      * @return number of methods successfully hooked (0 if the class is absent)
@@ -132,10 +153,12 @@ public final class HookEngine {
         return new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
-                try {
-                    logCall(site, param);
-                } catch (Throwable t) {
-                    reportOnce(site + ":before", t);
+                if (verbose) {
+                    try {
+                        logCall(site, param);
+                    } catch (Throwable t) {
+                        reportOnce(site + ":before", t);
+                    }
                 }
                 // Extra work runs even when the call itself was deduplicated,
                 // because state capture must not depend on log throttling.
@@ -150,7 +173,7 @@ public final class HookEngine {
 
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
-                if (!logResult) {
+                if (!logResult || !verbose) {
                     return;
                 }
                 try {

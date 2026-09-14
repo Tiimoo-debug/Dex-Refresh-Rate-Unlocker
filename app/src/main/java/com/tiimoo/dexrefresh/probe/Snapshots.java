@@ -6,6 +6,7 @@ import com.tiimoo.dexrefresh.core.Cfg;
 import com.tiimoo.dexrefresh.core.Dumper;
 import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
+import com.tiimoo.dexrefresh.core.Votes;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -123,12 +124,6 @@ public final class Snapshots {
                 .append(" label='").append(label).append('\'')
                 .append(" t=").append(System.currentTimeMillis())
                 .append(" ==========\n");
-        try {
-            sb.append("[dex-hints] ").append(DeXState.hints()).append('\n');
-        } catch (Throwable t) {
-            sb.append("[dex-hints] failed: ").append(t).append('\n');
-        }
-
         // The priority table and SurfaceControl inventory are printed at boot,
         // but the first device run showed boot output long gone from the logcat
         // ring buffer by the time anyone looks. Repeat them in every snapshot so
@@ -331,32 +326,23 @@ public final class Snapshots {
      * against the DeX-off one and the vote that appears (or tightens) is the
      * thing capping the panel.
      */
+    /**
+     * Render the live vote table: display id -> priority -> vote.
+     *
+     * <p>This is the payload of the whole exercise. Diff the DeX-on snapshot
+     * against the DeX-off one and the vote that appears (or tightens) is the
+     * thing capping the panel.
+     */
     private static String dumpVotes(int depth) {
-        Object dmd = modeDirector();
-        if (dmd == null) {
-            return "DisplayModeDirector instance not captured\n";
-        }
-        Object storage = Reflect.findByTypeFragment(dmd, "VotesStorage");
-        Object votesByDisplay = null;
-        if (storage != null) {
-            votesByDisplay = Reflect.findByTypeFragment(storage, "SparseArray");
-        }
-        if (votesByDisplay == null) {
-            // Pre-VotesStorage layout keeps the map on the director itself.
-            votesByDisplay = Reflect.findByTypeFragment(dmd, "SparseArray");
-        }
-        if (!(votesByDisplay instanceof SparseArray)) {
-            return "vote map not found (storage=" + Dumper.describe(storage, false)
-                    + "); see the mode-director section for the raw field dump\n";
+        SparseArray<?> outer = Votes.byDisplay();
+        if (outer == null) {
+            return "vote map not found; see the mode-director section for the raw dump\n";
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("source: ").append(storage == null ? "DisplayModeDirector" : "VotesStorage")
-                .append('\n');
-        SparseArray<?> outer = (SparseArray<?>) votesByDisplay;
         for (int i = 0; i < outer.size(); i++) {
             int displayId = outer.keyAt(i);
             sb.append("display ").append(displayId)
-                    .append(displayId < 0 ? " (GLOBAL)" : "").append(":\n");
+                    .append(displayId == Votes.GLOBAL_ID ? " (GLOBAL)" : "").append(":\n");
             Object inner = outer.valueAt(i);
             if (!(inner instanceof SparseArray)) {
                 sb.append("   ").append(Dumper.describe(inner, true)).append('\n');
@@ -367,16 +353,12 @@ public final class Snapshots {
                 sb.append("   (no votes)\n");
             }
             for (int j = 0; j < votes.size(); j++) {
-                int priority = votes.keyAt(j);
                 Object vote = votes.valueAt(j);
-                sb.append(String.format(Locale.US, "   priority %3d %-34s %s%n",
-                        priority, ProbeState.votePriorityName(priority),
-                        Heartbeat.terse(vote)));
-                sb.append(String.format(Locale.US, "       raw: %s%n",
-                        Dumper.describe(vote, true)));
+                sb.append(String.format(Locale.US, "   priority %3d  %s%n",
+                        votes.keyAt(j), Votes.terse(vote)));
                 if (vote != null && depth > 1) {
-                    sb.append(indent(Dumper.dump("      vote fields", vote,
-                            Math.min(depth, 2), true)));
+                    sb.append(String.format(Locale.US, "       raw: %s%n",
+                            Dumper.describe(vote, true)));
                 }
             }
         }
@@ -396,7 +378,7 @@ public final class Snapshots {
                 // Use the display ids that actually exist. This was hardcoded
                 // to {0,1,2}, so the external display - which has shown up as
                 // 6 and as 7 on this device - was never queried at all.
-                for (int displayId : knownDisplayIds()) {
+                for (int displayId : Votes.displayIds()) {
                     try {
                         Object specs = m.invoke(dmd, displayId);
                         sb.append("getDesiredDisplayModeSpecs(").append(displayId)
@@ -459,36 +441,6 @@ public final class Snapshots {
         return sb.length() == 0 ? "(no matching methods)\n" : sb.toString();
     }
 
-    /** Display ids present in the vote map, plus 0 as a floor. */
-    static int[] knownDisplayIds() {
-        java.util.TreeSet<Integer> ids = new java.util.TreeSet<Integer>();
-        ids.add(0);
-        try {
-            Object dmd = modeDirector();
-            Object storage = dmd == null ? null : Reflect.findByTypeFragment(dmd, "VotesStorage");
-            Object byDisplay = storage != null
-                    ? Reflect.findByTypeFragment(storage, "SparseArray")
-                    : null;
-            if (byDisplay instanceof SparseArray) {
-                SparseArray<?> outer = (SparseArray<?>) byDisplay;
-                for (int i = 0; i < outer.size(); i++) {
-                    int id = outer.keyAt(i);
-                    if (id >= 0) {
-                        ids.add(id);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-            // fall back to just display 0
-        }
-        int[] out = new int[ids.size()];
-        int i = 0;
-        for (Integer id : ids) {
-            out[i++] = id;
-        }
-        return out;
-    }
-
     private static String dumpLastSeen() {
         if (ProbeState.LAST_SEEN.isEmpty()) {
             return "(nothing observed yet)\n";
@@ -540,19 +492,22 @@ public final class Snapshots {
         return null;
     }
 
-    /** DisplayModeDirector, via the capture or by searching the DMS fields. */
+    /**
+     * DisplayModeDirector, via the constructor capture or by searching the
+     * DisplayManagerService fields. Publishes it to {@link Votes}, which is
+     * where every other reader gets it from.
+     */
     public static Object modeDirector() {
         Object dmd = ProbeState.displayModeDirector;
-        if (dmd != null) {
-            return dmd;
+        if (dmd == null) {
+            Object dms = displayManagerService();
+            dmd = dms == null ? null : Reflect.findByTypeFragment(dms, "DisplayModeDirector");
+            if (dmd != null) {
+                ProbeState.displayModeDirector = dmd;
+            }
         }
-        Object dms = displayManagerService();
-        if (dms == null) {
-            return null;
-        }
-        dmd = Reflect.findByTypeFragment(dms, "DisplayModeDirector");
-        if (dmd != null) {
-            ProbeState.displayModeDirector = dmd;
+        if (dmd != null && Votes.modeDirector() == null) {
+            Votes.setModeDirector(dmd);
         }
         return dmd;
     }

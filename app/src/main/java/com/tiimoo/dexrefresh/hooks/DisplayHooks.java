@@ -5,10 +5,10 @@ import com.tiimoo.dexrefresh.core.Dumper;
 import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
 import com.tiimoo.dexrefresh.core.Throttle;
+import com.tiimoo.dexrefresh.core.Votes;
 import com.tiimoo.dexrefresh.probe.ClassScout;
 import com.tiimoo.dexrefresh.probe.CommandPoller;
 import com.tiimoo.dexrefresh.probe.Heartbeat;
-import com.tiimoo.dexrefresh.probe.ControlReceiver;
 import com.tiimoo.dexrefresh.probe.ProbeState;
 import com.tiimoo.dexrefresh.probe.Snapshots;
 import com.tiimoo.dexrefresh.probe.Unlock;
@@ -229,6 +229,7 @@ public final class DisplayHooks {
                     @Override
                     public void accept(Object instance) {
                         ProbeState.displayModeDirector = instance;
+                        Votes.setModeDirector(instance);
                     }
                 });
                 break;
@@ -329,7 +330,6 @@ public final class DisplayHooks {
         Snapshots.runLater(0, new Runnable() {
             @Override
             public void run() {
-                ControlReceiver.register(ProbeState.systemContext);
                 Snapshots.take("boot-baseline", Cfg.SNAPSHOT_DEPTH, false);
             }
         });
@@ -477,7 +477,7 @@ public final class DisplayHooks {
         ProbeState.record(key, rendered);
         ProbeLog.post("VOTE %s display=%d priority=%d -> %s%s",
                 action, displayId, priority,
-                Heartbeat.terse(vote),
+                Votes.terse(vote),
                 prev == null ? "" : "   [was " + prev + "]");
         if (vote != null) {
             ProbeLog.postBlock(Dumper.dumpShallow("      vote", vote));
@@ -540,50 +540,9 @@ public final class DisplayHooks {
         if (displayId == GLOBAL_DISPLAY_ID) {
             return true;
         }
-        return capsPhysicalBelow(vote, 120f, 0);
+        return Votes.capsPhysicalBelow(vote, 120f);
     }
 
-    /**
-     * True when this vote (or one nested inside a CombinedVote) is a physical
-     * refresh-rate vote whose maximum is below {@code threshold}.
-     */
-    private static boolean capsPhysicalBelow(Object vote, float threshold, int depth) {
-        if (vote == null || depth > 3) {
-            return false;
-        }
-        try {
-            if (vote.getClass().getName().contains("Physical")) {
-                Object max = Reflect.get(vote, "mMaxRefreshRate");
-                if (max instanceof Number) {
-                    float v = ((Number) max).floatValue();
-                    if (v > 0f && v < threshold) {
-                        return true;
-                    }
-                }
-            }
-            for (Class<?> k = vote.getClass(); k != null && k != Object.class;
-                    k = k.getSuperclass()) {
-                for (Field f : k.getDeclaredFields()) {
-                    if (!java.util.List.class.isAssignableFrom(f.getType())) {
-                        continue;
-                    }
-                    f.setAccessible(true);
-                    Object nested = f.get(vote);
-                    if (!(nested instanceof java.util.List)) {
-                        continue;
-                    }
-                    for (Object child : (java.util.List<?>) nested) {
-                        if (capsPhysicalBelow(child, threshold, depth + 1)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-            // not traceable; no trace is better than a crash
-        }
-        return false;
-    }
 
     // ------------------------------------------------------------------
     // Mode selection

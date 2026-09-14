@@ -300,10 +300,18 @@ public final class Dumper {
                 try {
                     return clip(shortName(c) + " " + o);
                 } catch (Throwable t) {
-                    return shortName(c) + "@" + hash(o) + " <toString threw " + t + ">";
+                    return shortName(c) + " <toString threw " + t + ">";
                 }
             }
-            return shortName(c) + "@" + hash(o);
+            // Deliberately no identity hash. Rendering an opaque object as
+            // ClassName@1f2e3d made every call look different from the last,
+            // so change-triggered logging fired on every single invocation -
+            // the log was full of lines like
+            //   RET ...requestDisplayStateLocked -> LocalDisplayDevice$1@a582e35
+            //       [was LocalDisplayDevice$1@a587913]
+            // which is pure noise: the hash was never information we used, and
+            // it defeated the deduplication that keeps the log readable.
+            return shortName(c);
         } catch (Throwable t) {
             return "<describe failed: " + t + ">";
         }
@@ -339,10 +347,6 @@ public final class Dumper {
             }
         }
         return false;
-    }
-
-    private static String hash(Object o) {
-        return Integer.toHexString(System.identityHashCode(o));
     }
 
     public static String shortName(Class<?> c) {
