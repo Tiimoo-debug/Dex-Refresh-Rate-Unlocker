@@ -714,6 +714,18 @@ public final class DisplayHooks {
             if (rrMode != null) {
                 ProbeState.record("refreshRateMode:" + key, String.valueOf(rrMode));
             }
+            // The rate content is actually produced at, which is not the same
+            // as the mode the panel scans at. A display can scan at 144 Hz and
+            // show 60 fps; reporting only the mode hides exactly that, and
+            // every number in this project was the mode until now.
+            Object renderRate = Reflect.get(info, "renderFrameRate");
+            if (renderRate != null) {
+                ProbeState.record("render:" + key, Dumper.hz(renderRate));
+            }
+            Object override = Reflect.get(info, "refreshRateOverride");
+            if (override instanceof Number && ((Number) override).floatValue() > 0f) {
+                ProbeState.record("override:" + key, Dumper.hz(override));
+            }
             Object modesObj = Reflect.get(info, "supportedModes");
             if (!(modesObj instanceof Object[])) {
                 return;

@@ -135,17 +135,30 @@ public final class Votes {
         return null;
     }
 
-    /** True when this vote, or one nested in it, caps a rate below {@code limit}. */
+    /** True when this vote, or one nested in it, caps any rate below {@code limit}. */
     public static boolean capsBelow(Object vote, float limit) {
-        return capsBelow(vote, limit, false, 0);
+        return capsBelow(vote, limit, null, 0);
     }
 
-    /** As {@link #capsBelow}, but only counting votes on the physical rate. */
+    /**
+     * Only votes on the rate the panel scans at.
+     *
+     * <p>Android votes on two different things and they are easy to conflate:
+     * the <em>physical</em> refresh rate is how fast the panel scans, the
+     * <em>render</em> frame rate is how fast content is produced into it. A
+     * display can scan at 144 Hz while showing 60 fps, which looks like the
+     * monitor lying about its refresh rate and is not.
+     */
     public static boolean capsPhysicalBelow(Object vote, float limit) {
-        return capsBelow(vote, limit, true, 0);
+        return capsBelow(vote, limit, "Physical", 0);
     }
 
-    private static boolean capsBelow(Object vote, float limit, boolean physicalOnly, int depth) {
+    /** Only votes on the rate content is produced at. */
+    public static boolean capsRenderBelow(Object vote, float limit) {
+        return capsBelow(vote, limit, "Render", 0);
+    }
+
+    private static boolean capsBelow(Object vote, float limit, String kind, int depth) {
         if (vote == null || depth > MAX_NESTING) {
             return false;
         }
@@ -153,13 +166,13 @@ public final class Votes {
             List<?> children = nested(vote);
             if (children != null) {
                 for (Object child : children) {
-                    if (capsBelow(child, limit, physicalOnly, depth + 1)) {
+                    if (capsBelow(child, limit, kind, depth + 1)) {
                         return true;
                     }
                 }
                 return false;
             }
-            if (physicalOnly && !vote.getClass().getName().contains("Physical")) {
+            if (kind != null && !vote.getClass().getName().contains(kind)) {
                 return false;
             }
             Object max = Reflect.get(vote, "mMaxRefreshRate");

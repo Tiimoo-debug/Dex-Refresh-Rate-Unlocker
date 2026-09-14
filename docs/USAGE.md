@@ -47,6 +47,11 @@ monitor has been 6 and 7 on this device. The heartbeat now names every display:
 STATE | names{0=Built-in Screen; 6=<your monitor>} | modes{0=1@120 ... ; 6=...}
 ```
 
+The short form on `debug.dexrr.state` reads `6=120/144r60`: display 6 is
+scanning at 120, advertises 144, and content is being produced at 60. The
+number after `r` is the render frame rate and it is a different thing from the
+mode — see below.
+
 The built-in panel is 1440x3088 at up to 120 Hz. **It is not the target.** Read
 the entry for the external display id, not display 0 — an easy mistake that cost
 a whole run.
@@ -156,6 +161,26 @@ su -c 'setprop debug.dexrr.cmd "why $(date +%s)"'
 sleep 5
 su -c 'logcat -d -s DexRRReport:V'
 ```
+
+`why` answers in two parts, because there are two rates:
+
+```
+panel scans at:      120.0 Hz
+content produced at: 60.000Hz
+
+votes limiting the panel scan rate:
+   9:10  PhysicalVote(0.000,120.000)
+   -1:11 CombinedVote[PhysicalVote(10.000,120.000)]   <- GLOBAL, applies to every display
+
+votes limiting the render frame rate:
+   9:13  RenderVote(0.000,120.000)
+```
+
+The **panel scan rate** is the display mode — what the monitor's own OSD reads
+out. The **render frame rate** is how fast Android produces content into it.
+A panel scanning at 144 while content is produced at 60 is a real and common
+state, and it is what "the monitor says 144 but it looks like 60" is. Raising
+one does not raise the other; the generated `unlock` line covers both.
 
 The `$(date +%s)` matters: the command channel only fires when the property
 *value changes*, so running the identical string twice does nothing the second

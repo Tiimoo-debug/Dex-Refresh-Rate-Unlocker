@@ -623,3 +623,87 @@ answer: one `STATE` line with DeX **disconnected** settles it.
 Note that the two global votes (p11, p19 on display -1) are present regardless of
 DeX and merge into every display. If the ceiling turns out to live in p19, that
 points at a global policy rather than anything DeX-specific.
+
+## Two refresh rates, and only one of them has been measured
+
+The monitor's own OSD reported 144 Hz while the content on it was moving at
+60 fps. That is not the monitor lying and it is not a contradiction — they are
+two different numbers, and this project had only ever reported one of them.
+
+- **Physical refresh rate** — how fast the panel scans. This is the display
+  *mode*: `87 @ 144`. It is what the monitor's OSD reads out, because it is the
+  only thing the monitor can see.
+- **Render frame rate** — how fast Android produces content into that panel.
+  A 144 Hz scan-out showing a 60 fps render is 144 Hz of hardware doing 60 Hz
+  of work, and every second frame onward is a repeat.
+
+Android votes on the two separately, and has since the vote types were split:
+
+| vote class | constrains |
+| --- | --- |
+| `RefreshRateVote$PhysicalVote(min,max)` | the mode the panel scans at |
+| `RefreshRateVote$RenderVote(min,max)` | the rate content is produced at |
+
+Both extend the abstract `RefreshRateVote`, which is where `mMinRefreshRate`
+and `mMaxRefreshRate` actually live — the subclass carries no fields of its
+own. So the *only* thing distinguishing a physical cap from a render cap is the
+class name. Reflection that reads `mMaxRefreshRate` and stops there, which is
+what this module did, cannot tell them apart at all.
+
+That is why `d9:13 RenderVote(0,120)` was listed next to `d9:10
+PhysicalVote(0,120)` in the constraint set as though they were the same kind of
+thing. They are not: dropping only the physical one would have raised the OSD
+number to 144 and changed nothing about how the display actually looked.
+
+### What was measured, and what was not
+
+Every rate quoted anywhere above this section is the **physical** one. It comes
+from the mode list and `DisplayInfo`'s active mode. The render rate was never
+read, so:
+
+- "120 Hz on both panels" (run 4) means both panels *scan* at 120. Whether
+  content was produced at 120 is unknown for that run.
+- The user's GL gears observation — OSD at 144, motion at 120 — is the same
+  split showing up by eye, and is consistent with `RenderVote(0,120)` standing
+  while the physical cap was gone.
+
+### Changes made because of this
+
+- `DisplayInfo.renderFrameRate` is now recorded per display as `render:<id>`,
+  and `refreshRateOverride` as `override:<id>` when non-zero. The override is
+  the per-app frame-rate override path; a non-zero value there means the rate
+  is being set for one app rather than for the display.
+- `STATE` lines carry the render rate: `9=120/144r60` reads *display 9, active
+  120, max 144, content at 60*.
+- `why` reports the two separately — "panel scans at" and "content produced
+  at" — and lists the votes limiting each under its own heading. A vote holding
+  both appears under both, and the generated `unlock` spec lists it once.
+- `Votes.capsPhysicalBelow` / `capsRenderBelow` filter by vote class name;
+  `capsBelow` without a kind keeps the old any-cap behaviour, which is what
+  `auto` uses, so auto-unlock already drops render caps and needs no change.
+
+### What this does not explain
+
+If the render rate turns out to be at the maximum and motion still looks like
+60, the vote table is exhausted and the limit is downstream of it — the
+compositor, the app's own frame pacing, or a DeX-specific performance cap. That
+would be the first thing in this project not visible in `DisplayModeDirector`
+at all.
+
+## DeX caps the rate; mirroring does not
+
+Independent of the vote table, on the same cable and the same monitor:
+
+- **mirroring** ran at 120 Hz
+- **DeX** ran at 60 Hz
+
+Same hardware, same link, same session — only the mode differs. This is a clean
+behavioural confirmation that the 60 Hz cap is a property of DeX and not of the
+cable, the dock, the monitor, or the link's bandwidth. It agrees with where the
+cap was found: `d-1 p19`, a global `CombinedVote[PhysicalVote(0,60)
+DisableRefreshRateSwitchingVote]` that appears with DeX and is what `unlock
+-1:19` removes.
+
+It also disposes of the remaining doubt about the withdrawn bandwidth theory. A
+link that carries 120 Hz while mirroring carries 120 Hz while in DeX; nothing
+about the wire changed when the mode did.

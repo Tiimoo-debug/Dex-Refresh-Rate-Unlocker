@@ -79,40 +79,48 @@ public final class Diagnose {
                     + "unless a size vote pins it.\n");
         }
 
-        if (modes.activeRate >= modes.maxRate) {
-            sb.append("\nAlready at the maximum this display advertises.\n");
-            sb.append("If measured frame rate is still lower, the limit is no longer "
-                    + "in the vote table - look at render rate or the app itself.\n");
-            ProbeLog.postReport(sb.toString());
-            return;
+        // Two rates, reported separately. The panel can scan at 144 Hz while
+        // content is produced at 60 - which is what "the monitor reports 144
+        // but it feels like 60" actually is. Reporting only the mode, as this
+        // did, hides exactly that case.
+        String renderText = ProbeState.LAST_SEEN.get("render:" + displayId);
+        float renderRate = parseRate(renderText);
+        sb.append("panel scans at:      ").append(modes.activeRate).append(" Hz\n");
+        sb.append("content produced at: ")
+                .append(renderText == null ? "unknown" : renderText).append('\n');
+        String override = ProbeState.LAST_SEEN.get("override:" + displayId);
+        if (override != null) {
+            sb.append("frame rate override: ").append(override).append('\n');
         }
 
-        List<String> blockers = new ArrayList<String>();
-        collectBlockers(displayId, modes.maxRate, blockers);
-        collectBlockers(Votes.GLOBAL_ID, modes.maxRate, blockers);
+        List<String> spec = new ArrayList<String>();
+        boolean looked = false;
+        boolean anything = false;
 
-        if (blockers.isEmpty()) {
-            sb.append("\nNo vote caps this display below ").append(modes.maxRate)
-                    .append(" Hz.\n")
-                    .append("The limit is somewhere other than the vote table.\n");
+        if (modes.activeRate < modes.maxRate) {
+            looked = true;
+            anything |= report(sb, spec, "panel scan rate", displayId, modes.maxRate, true);
         } else {
-            sb.append("\nVotes holding it below ").append(modes.maxRate).append(" Hz:\n");
-            StringBuilder spec = new StringBuilder();
-            for (String b : blockers) {
-                sb.append("   ").append(b).append('\n');
-                int colon = b.indexOf(' ');
-                if (colon > 0) {
-                    if (spec.length() > 0) {
-                        spec.append(',');
-                    }
-                    spec.append(b.substring(0, colon));
-                }
-            }
+            sb.append("\nThe panel already scans at the fastest mode it advertises.\n");
+        }
+
+        // A hair of slack: render rates land on 59.997 and friends, and a
+        // fraction of a hertz is not a cap worth chasing.
+        if (renderRate > 0f && renderRate < modes.maxRate - 1f) {
+            looked = true;
+            anything |= report(sb, spec, "render frame rate", displayId, modes.maxRate, false);
+        }
+
+        if (!looked) {
+            sb.append("Content is produced as fast as the panel scans. Nothing to unlock.\n");
+        } else if (!anything) {
+            sb.append("\nNo vote is holding this display back. Any limit is outside the\n")
+                    .append("vote table - the link, the compositor, or the app itself.\n");
+        } else {
             sb.append("\nTo drop all of them:\n");
-            sb.append("   setprop debug.dexrr.cmd \"unlock ").append(spec).append("\"\n");
-            sb.append("Global entries are written as -1:<priority> and per-display ones "
-                    + "as <id>:<priority>;\nprefer * over a fixed id for displays that "
-                    + "get re-created, such as HDMI.\n");
+            sb.append("   setprop debug.dexrr.cmd \"unlock ").append(join(spec)).append("\"\n");
+            sb.append("Global entries are -1:<priority>; prefer * over a fixed id for\n")
+                    .append("displays that get re-created, such as HDMI.\n");
         }
         ProbeLog.postReport(sb.toString());
     }
@@ -159,21 +167,89 @@ public final class Diagnose {
         }
     }
 
-    /** Add "d:p  <rendered vote>" for each vote on this display capping below max. */
-    private static void collectBlockers(int displayId, float maxRate, List<String> out) {
+    /**
+     * Report the votes limiting one rate, and add them to the unlock spec.
+     *
+     * <p>Physical and render votes are reported apart because they are apart in
+     * the framework: a {@code PhysicalVote} sets how fast the panel scans, a
+     * {@code RenderVote} how fast content is produced for it. Lumping them
+     * together is what made a 144 Hz panel showing 60 fps content look like a
+     * single unexplained number.
+     *
+     * @return true if anything was found holding this rate down
+     */
+    private static boolean report(StringBuilder sb, List<String> spec, String label,
+                                  int displayId, float target, boolean physical) {
+        List<String> blockers = new ArrayList<String>();
+        collectTyped(displayId, target, physical, blockers);
+        collectTyped(Votes.GLOBAL_ID, target, physical, blockers);
+        sb.append("\nvotes limiting the ").append(label).append(":\n");
+        if (blockers.isEmpty()) {
+            sb.append("   (none - the limit is not in the vote table)\n");
+            return false;
+        }
+        for (int i = 0; i < blockers.size(); i++) {
+            sb.append("   ").append(blockers.get(i)).append('\n');
+            // Both rates are often held by the same vote; list each once.
+            String key = blockers.get(i).split("\\s+")[0];
+            if (!spec.contains(key)) {
+                spec.add(key);
+            }
+        }
+        return true;
+    }
+
+    /** Add "d:p  <rendered vote>" for each vote of one kind capping below target. */
+    private static void collectTyped(int displayId, float target, boolean physical,
+                                     List<String> out) {
         SparseArray<?> votes = Votes.forDisplay(displayId);
         if (votes == null) {
             return;
         }
         for (int i = 0; i < votes.size(); i++) {
-            int priority = votes.keyAt(i);
             Object vote = votes.valueAt(i);
-            if (Votes.capsBelow(vote, maxRate)) {
+            boolean caps = physical
+                    ? Votes.capsPhysicalBelow(vote, target)
+                    : Votes.capsRenderBelow(vote, target);
+            if (caps) {
                 out.add(String.format(Locale.US, "%d:%d  %s%s",
-                        displayId, priority, Votes.terse(vote),
+                        displayId, votes.keyAt(i), Votes.terse(vote),
                         displayId == Votes.GLOBAL_ID
                                 ? "   <- GLOBAL, applies to every display" : ""));
             }
+        }
+    }
+
+    /** Comma-separated spec, as {@code unlock} expects it. */
+    private static String join(List<String> parts) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
+    }
+
+    /** Leading number of a recorded rate such as "60.0 Hz"; 0 if unparseable. */
+    private static float parseRate(String text) {
+        if (text == null) {
+            return 0f;
+        }
+        String trimmed = text.trim();
+        int end = 0;
+        while (end < trimmed.length()
+                && (Character.isDigit(trimmed.charAt(end)) || trimmed.charAt(end) == '.')) {
+            end++;
+        }
+        if (end == 0) {
+            return 0f;
+        }
+        try {
+            return Float.parseFloat(trimmed.substring(0, end));
+        } catch (NumberFormatException e) {
+            return 0f;
         }
     }
 

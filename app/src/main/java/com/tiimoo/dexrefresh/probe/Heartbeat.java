@@ -118,8 +118,15 @@ public final class Heartbeat {
                 if (modes == null) {
                     continue;
                 }
-                sb.append(' ').append(key.substring("modes:".length())).append('=')
+                String id = key.substring("modes:".length());
+                sb.append(' ').append(id).append('=')
                         .append(activeRate(modes)).append('/').append(maxRate(modes));
+                // Render rate alongside the mode, because "scans at 144, shows
+                // 60 fps" is a real state and the mode alone cannot show it.
+                String render = ProbeState.LAST_SEEN.get("render:" + id);
+                if (render != null) {
+                    sb.append('r').append(rounded(render));
+                }
             }
             String value = sb.toString();
             if (value.length() > 90) {
@@ -200,6 +207,7 @@ public final class Heartbeat {
         }
         appendByPrefix(sb, "name:", "names");
         appendByPrefix(sb, "modes:", "modes");
+        appendByPrefix(sb, "render:", "renderFps");
         appendByPrefix(sb, "refreshRateMode:", "rrMode");
         appendByPrefix(sb, "committed:", "committed");
         if (Unlock.active() || Unlock.isAuto()) {
@@ -260,6 +268,15 @@ public final class Heartbeat {
     }
 
     /** Append every recorded entry sharing a prefix, sorted for stable diffs. */
+    /** "59.997Hz" -> "60", to keep the state property inside its length cap. */
+    private static String rounded(String hz) {
+        try {
+            return String.valueOf(Math.round(Float.parseFloat(hz.replace("Hz", ""))));
+        } catch (NumberFormatException e) {
+            return hz;
+        }
+    }
+
     private static void appendByPrefix(StringBuilder sb, String prefix, String label) {
         Set<Integer> live = liveDisplayIds();
         List<String> keys = new ArrayList<String>();
