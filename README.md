@@ -92,14 +92,32 @@ Full workflow in **[docs/USAGE.md](docs/USAGE.md)**. The short version, from a
 Termux root shell — no ADB needed:
 
 ```sh
-su -c "am broadcast -a com.tiimoo.dexrefresh.ACTION_SNAPSHOT --es label dex-off"
+su -c 'logcat -G 64M'
+su -c 'setprop debug.dexrr.cmd "snapshot dex-off"'
 # start DeX, wait for it to settle
-su -c "am broadcast -a com.tiimoo.dexrefresh.ACTION_SNAPSHOT --es label dex-on"
-su -c "logcat -d -s DexRRProbe:V > /sdcard/dexprobe.txt"
+su -c 'setprop debug.dexrr.cmd "snapshot dex-on"'
+su -c 'logcat -d -s DexRRProbe:V' > /sdcard/dexprobe.txt
 ```
 
 Then diff the two snapshots. The vote that appears or tightens between them is
 what caps the panel.
+
+`setprop` rather than `am broadcast`: broadcasts turned out to be unreliable on
+this device, so the property channel is the primary trigger. See
+[docs/FINDINGS.md](docs/FINDINGS.md).
+
+## What has been found so far
+
+`SurfaceControl.restrictHighRefreshRate(boolean)` exists on One UI 7 and not in
+AOSP — Samsung's own refresh-rate restrictor, and the One UI 7 counterpart of
+the `notifyHFRmode` call LibreDeX found on One UI 8. It files a vote on display
+0 within milliseconds of being called.
+
+It is not the cap we are after, though: the vote raises the floor to 60 Hz
+(`min=60, max=Infinity`) rather than lowering the ceiling, which is LTPO idle
+prevention. The ceiling was already 60 in both halves of the first capture.
+Full write-up, including what went wrong with that run, in
+[docs/FINDINGS.md](docs/FINDINGS.md).
 
 ## Safety notes
 

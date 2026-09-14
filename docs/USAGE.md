@@ -27,41 +27,59 @@ anything else:
   exist on One UI 7, including which generation of the vote system it runs
   (Android 15 splits `Vote` into one class per vote kind)
 
-## 1. Baseline snapshot (no DeX)
+## 1. Confirm there is something to measure
+
+Settings → Display → Motion smoothness must be **Adaptive**, not Standard. On
+Standard the panel is 60 Hz by setting and both halves of the diff will look
+identical — which is exactly what happened on the first run.
+
+## 2. Raise the log buffer
+
+Boot output scrolls away fast, and the priority table is printed at boot:
+
+```sh
+su -c 'logcat -G 64M'
+```
+
+(`tools/dex-probe.sh bigbuffer` does the same. It resets on reboot.)
+
+## 3. Baseline snapshot (no DeX)
 
 Phone idle, not docked, not mirroring:
 
 ```sh
-su -c "am broadcast -a com.tiimoo.dexrefresh.ACTION_SNAPSHOT --es label dex-off"
+su -c 'setprop debug.dexrr.cmd "snapshot dex-off"'
 ```
 
-## 2. Start DeX, then snapshot again
+**Use `setprop`, not `am broadcast`.** Broadcasts proved unreliable here: they
+fail outright from a plain Termux shell, and on the first run the receiver had
+never registered so even the root-shell broadcast did nothing. The property
+channel needs no Context, no boot phase and no receiver — just a root shell.
+
+## 4. Start DeX, then snapshot again
 
 Dock or start DeX, let it settle for a few seconds, then:
 
 ```sh
-su -c "am broadcast -a com.tiimoo.dexrefresh.ACTION_SNAPSHOT --es label dex-on"
+su -c 'setprop debug.dexrr.cmd "snapshot dex-on"'
 ```
 
-Label the snapshots by hand like this even though the module also snapshots
-automatically on display add/remove. Automatic DeX detection is guesswork until
-we know which signal this firmware updates; your label is ground truth, and the
-whole method depends on the two sides of the diff being correctly identified.
+Repeating a label needs the value to change, so append anything:
+`"snapshot dex-on 2"`. `tools/dex-probe.sh snapshot dex-on` handles that for
+you.
 
-Extra options:
+Label by hand even though the module also snapshots automatically on display
+events: automatic DeX detection is guesswork until we know which signal this
+firmware updates, and the whole method depends on the two sides of the diff
+being correctly identified.
+
+For a quicker, less noisy capture of just the vote table:
 
 ```sh
-# deeper object dump (default 4)
---ei depth 6
-# also call getDesiredDisplayModeSpecs() rather than only reading fields
---ez getters true
+su -c 'setprop debug.dexrr.cmd "votes dex-on"'
 ```
 
-`getters` is off by default: those calls take mode-director locks, and while
-that is safe from the snapshot thread it is one more way to perturb the thing
-you are trying to observe.
-
-## 3. Pull the log
+## 5. Pull the log
 
 ```sh
 su -c "logcat -d -s DexRRProbe:V" > /sdcard/dexprobe.txt
@@ -75,7 +93,7 @@ To watch live while docking:
 su -c "logcat -s DexRRProbe:V"
 ```
 
-## 4. Read the diff
+## 6. Read the diff
 
 Compare the two `SNAPSHOT` blocks. In order of how directly they answer the
 question:
@@ -84,6 +102,11 @@ question:
    A vote that is absent in `dex-off` and present in `dex-on`, or one whose
    range narrows between them, is the thing capping the panel. Note the priority
    number *and* its name.
+
+   Look especially for whichever vote holds the **maximum** down. Run 1 found
+   `restrictHighRefreshRate` raising the floor to 60 (min=60, max=Infinity) —
+   that is LTPO idle prevention, not the cap. The ceiling was already 60 in
+   both states and never changed, so only a full table dump will show it.
 2. **`[displays]`** — `supportedModes` for each display. If the 144 Hz mode is
    missing from the list under DeX (rather than present but unselected), the
    filtering happens earlier, when the mode list is built, and the `MODE
@@ -95,11 +118,14 @@ Also scan the running log between the two snapshots for:
 
 - `VOTE ... -> ...   [was ...]` — a vote transition, with its previous value.
   These are printed only when something actually changes, so every line matters.
+- `RESTRICT-HRR restrictHighRefreshRate(true)` followed by a **caller stack** —
+  Samsung's own restrictor. The stack says which subsystem asked for it, which
+  is what ties it to DeX or rules it out.
 - `CALL SurfaceControl#setDesiredDisplayModeSpecs(...)` — what was actually
   pushed to SurfaceFlinger.
 - `DISPLAY-EVENT ...` — display add/remove, i.e. the DeX session starting.
 
-## 5. Class and field discovery
+## 7. Class and field discovery
 
 When something did not resolve, or a Samsung class shows up that we have no
 names for:
@@ -107,11 +133,10 @@ names for:
 ```sh
 # walk the live DisplayManagerService object graph and report every
 # display/Samsung class it reaches, with the field path that got there
-su -c "am broadcast -a com.tiimoo.dexrefresh.ACTION_SCOUT --ez scan true"
+su -c 'setprop debug.dexrr.cmd "scout"'
 
 # full field + method inventory of one class
-su -c "am broadcast -a com.tiimoo.dexrefresh.ACTION_SCOUT \
-  --es class com.android.server.display.mode.DisplayModeDirector"
+su -c 'setprop debug.dexrr.cmd "class com.android.server.display.mode.Vote"'
 ```
 
 The graph scan is the one that finds names nobody guessed: whatever Samsung

@@ -2,17 +2,17 @@
 # On-device helper for the DeX refresh-rate probe. Run from a Termux root shell.
 #
 #   ./dex-probe.sh snapshot dex-off     take a labelled snapshot
+#   ./dex-probe.sh votes [label]        vote table only, less noise
 #   ./dex-probe.sh scout                class/field discovery
 #   ./dex-probe.sh class <fqcn>         dump one class's fields + methods
 #   ./dex-probe.sh watch                follow the probe log
 #   ./dex-probe.sh save [file]          dump the log buffer to a file
+#   ./dex-probe.sh bigbuffer            raise the logcat buffer to 64M
 #
 # Everything here is read-only with respect to the device.
 
 set -u
 
-ACTION_SNAPSHOT=com.tiimoo.dexrefresh.ACTION_SNAPSHOT
-ACTION_SCOUT=com.tiimoo.dexrefresh.ACTION_SCOUT
 TAG=DexRRProbe
 
 # Re-exec as root if we are not already.
@@ -21,16 +21,25 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 cmd=${1:-help}
+PROP=debug.dexrr.cmd
 
+# The property channel is used rather than `am broadcast`: broadcasts proved
+# unreliable on this device (they fail outright from a non-root shell, and the
+# receiver may never have registered), whereas setprop on a debug.* key always
+# works from root and needs nothing on the module side but a poller.
 case "$cmd" in
     snapshot)
         label=${2:-manual}
-        depth=${3:-4}
-        am broadcast -a "$ACTION_SNAPSHOT" --es label "$label" --ei depth "$depth" >/dev/null
-        echo "snapshot '$label' requested; it appears in the log within a second or two"
+        # Vary the value so repeating the same label still triggers.
+        setprop "$PROP" "snapshot $label $(date +%s)"
+        echo "snapshot '$label' requested; it appears in the log within a few seconds"
+        ;;
+    votes)
+        setprop "$PROP" "votes ${2:-votes} $(date +%s)"
+        echo "vote table requested"
         ;;
     scout)
-        am broadcast -a "$ACTION_SCOUT" --ez scan true >/dev/null
+        setprop "$PROP" "scout $(date +%s)"
         echo "graph scan requested"
         ;;
     class)
@@ -38,7 +47,7 @@ case "$cmd" in
             echo "usage: $0 class <fully.qualified.ClassName>" >&2
             exit 2
         fi
-        am broadcast -a "$ACTION_SCOUT" --es class "$2" --ez scan false >/dev/null
+        setprop "$PROP" "class $2"
         echo "signature dump of $2 requested"
         ;;
     watch)
@@ -49,7 +58,12 @@ case "$cmd" in
         logcat -d -s "$TAG":V > "$out"
         echo "wrote $out ($(wc -l < "$out") lines)"
         ;;
+    bigbuffer)
+        # Boot-time output (the priority table, the class report) scrolls out of
+        # the default ring buffer long before anyone looks at it.
+        logcat -G 64M && echo "logcat buffer raised to 64M (resets on reboot)"
+        ;;
     *)
-        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
         ;;
 esac

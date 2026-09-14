@@ -19,6 +19,24 @@ public final class Cfg {
     public static final String ACTION_SCOUT = PKG + ".ACTION_SCOUT";
 
     /**
+     * Property-based command channel, polled by {@link
+     * com.tiimoo.dexrefresh.probe.CommandPoller}.
+     *
+     * <p>This exists because the broadcast route proved unreliable in practice:
+     * `am broadcast` from a non-root Termux shell fails outright, and even from
+     * a root shell the receiver may never have registered. A property needs no
+     * Context, no boot phase and no receiver - system_server can always read
+     * one, and `setprop` on a debug.* key is always permitted from a root
+     * shell. Any change to the value triggers the command.
+     *
+     *   su -c 'setprop debug.dexrr.cmd "snapshot dex-off"'
+     */
+    public static final String PROP_CMD = "debug.dexrr.cmd";
+
+    /** How often the command property is polled. */
+    public static final long CMD_POLL_MS = 2000L;
+
+    /**
      * Set by the hook once it is live inside system_server, so StatusActivity
      * can tell you whether the module actually loaded. Best-effort: SELinux may
      * refuse the write, in which case the status simply reads "unknown".

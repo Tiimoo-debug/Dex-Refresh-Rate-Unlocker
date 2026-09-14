@@ -191,13 +191,17 @@ public final class HookEngine {
         if (result == null) {
             return;
         }
-        String key = "ret:" + site;
+        // Key on the arguments as well as the site. getDesiredDisplayModeSpecs
+        // is called once per display id in a row; with a site-only key each
+        // call compared itself against a different display's result, so every
+        // "[was ...]" it printed was a comparison between unrelated displays.
+        String key = "ret:" + site + "(" + renderArgs(param.args) + ")";
         String rendered = Dumper.describe(result, false);
         String prev = Throttle.previous(key);
         if (!Throttle.changed(key, rendered) || !Throttle.allow(key)) {
             return;
         }
-        ProbeLog.post("RET  %s -> %s%s", site, rendered,
+        ProbeLog.post("RET  %s(%s) -> %s%s", site, renderArgs(param.args), rendered,
                 prev == null ? "" : "   [was " + prev + "]");
         if (shouldExpand(result)) {
             ProbeLog.postBlock(Dumper.dumpShallow("     result", result));

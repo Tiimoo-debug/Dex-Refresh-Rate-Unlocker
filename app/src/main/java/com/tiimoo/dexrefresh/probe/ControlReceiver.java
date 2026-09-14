@@ -7,6 +7,9 @@ import android.content.IntentFilter;
 
 import com.tiimoo.dexrefresh.core.Cfg;
 import com.tiimoo.dexrefresh.core.ProbeLog;
+import com.tiimoo.dexrefresh.core.Reflect;
+
+import java.lang.reflect.Method;
 
 /**
  * Lets you drive the probe from an on-device root shell, with no ADB involved:
@@ -45,12 +48,20 @@ public final class ControlReceiver extends BroadcastReceiver {
         if (registered) {
             return;
         }
-        if (!(contextObj instanceof Context)) {
-            ProbeLog.post("control receiver NOT registered: no system Context "
-                    + "(got " + contextObj + "). Snapshots still fire on display events.");
+        Object resolved = contextObj;
+        if (!(resolved instanceof Context)) {
+            // onBootPhase may never have run, or DisplayManagerService may not
+            // expose mContext under this name. Fall back to the system context
+            // held by ActivityThread, which exists regardless.
+            resolved = systemContextFromActivityThread();
+        }
+        if (!(resolved instanceof Context)) {
+            ProbeLog.post("control receiver NOT registered: no system Context. "
+                    + "Use the property channel instead: "
+                    + "su -c 'setprop " + Cfg.PROP_CMD + " \"snapshot dex-off\"'");
             return;
         }
-        Context context = (Context) contextObj;
+        Context context = (Context) resolved;
         IntentFilter filter = new IntentFilter();
         filter.addAction(Cfg.ACTION_SNAPSHOT);
         filter.addAction(Cfg.ACTION_SCOUT);
@@ -73,6 +84,30 @@ public final class ControlReceiver extends BroadcastReceiver {
         }
         ProbeLog.post("control receiver registered; trigger a snapshot with:");
         ProbeLog.post("  su -c 'am broadcast -a %s --es label <your-label>'", Cfg.ACTION_SNAPSHOT);
+    }
+
+    /** The system_server Context, via ActivityThread rather than DMS. */
+    private static Object systemContextFromActivityThread() {
+        try {
+            Class<?> at = Reflect.cls(ProbeState.systemServerClassLoader,
+                    "android.app.ActivityThread");
+            if (at == null) {
+                return null;
+            }
+            Method current = Reflect.method(at, "currentActivityThread");
+            if (current == null) {
+                return null;
+            }
+            Object thread = current.invoke(null);
+            if (thread == null) {
+                return null;
+            }
+            Method getSystemContext = Reflect.method(at, "getSystemContext");
+            return getSystemContext == null ? null : getSystemContext.invoke(thread);
+        } catch (Throwable t) {
+            ProbeLog.postThrowable("system context fallback", t);
+            return null;
+        }
     }
 
     @Override

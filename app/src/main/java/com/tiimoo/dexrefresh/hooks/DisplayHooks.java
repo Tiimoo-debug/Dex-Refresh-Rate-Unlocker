@@ -6,6 +6,7 @@ import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
 import com.tiimoo.dexrefresh.core.Throttle;
 import com.tiimoo.dexrefresh.probe.ClassScout;
+import com.tiimoo.dexrefresh.probe.CommandPoller;
 import com.tiimoo.dexrefresh.probe.ControlReceiver;
 import com.tiimoo.dexrefresh.probe.ProbeState;
 import com.tiimoo.dexrefresh.probe.Snapshots;
@@ -65,6 +66,11 @@ public final class DisplayHooks {
         ProbeState.systemServerClassLoader = cl;
 
         ProbeLog.postNow("==== installing system_server probes ====");
+        // Start the property command channel first and independently of
+        // everything else. On the first device run neither the broadcast
+        // receiver nor any snapshot ever fired, so the one control path that
+        // has no dependencies must not be behind any of the others.
+        CommandPoller.start(cl);
         harvestVotePriorities(cl);
         captureServiceInstances(cl);
         hookBootPhase(cl);
@@ -97,13 +103,33 @@ public final class DisplayHooks {
             ProbeLog.postNow("Vote class NOT FOUND - tried " + String.join(", ", VOTE_NAMES));
             return;
         }
-        ProbeLog.postNow("Vote class = " + vote.getName());
-        collectPriorityConstants(vote);
+        ProbeLog.postNow("Vote class = " + vote.getName()
+                + (vote.isInterface() ? " (interface - Android 15 style)" : " (class)"));
+        int found = collectPriorityConstants(vote);
+        ProbeLog.postNow("  " + found + " priority constants on the Vote type");
+        // Android 15 keeps an @IntDef holder as Vote$Priority, and Samsung may
+        // add its own elsewhere, so sweep the neighbours too.
+        for (Class<?> inner : safeInnerClasses(vote)) {
+            found += collectPriorityConstants(inner);
+        }
         for (String dmdName : DMD_NAMES) {
             Class<?> dmd = Reflect.cls(cl, dmdName);
             if (dmd != null) {
-                collectPriorityConstants(dmd);
+                found += collectPriorityConstants(dmd);
             }
+        }
+        for (String extra : new String[]{
+                "com.android.server.display.mode.VoteSummary",
+                "com.android.server.display.mode.VotesStorage"}) {
+            Class<?> c = Reflect.cls(cl, extra);
+            if (c != null) {
+                found += collectPriorityConstants(c);
+            }
+        }
+        if (found == 0) {
+            ProbeLog.postNow("!! no PRIORITY constants found anywhere - "
+                    + "dumping the raw inventory so we can see what this firmware has");
+            dumpAllStaticInts(vote);
         }
         List<Integer> keys = new ArrayList<>(ProbeState.VOTE_PRIORITY_NAMES.keySet());
         Collections.sort(keys);
@@ -115,26 +141,69 @@ public final class DisplayHooks {
         ProbeLog.postNow("---- end vote priority table ----");
     }
 
-    private static void collectPriorityConstants(Class<?> c) {
+    private static int collectPriorityConstants(Class<?> c) {
         Field[] fields;
         try {
             fields = c.getDeclaredFields();
         } catch (Throwable t) {
-            return;
+            ProbeLog.postNow("  priority scan failed on " + c.getName() + ": " + t);
+            return 0;
         }
+        int found = 0;
         for (Field f : fields) {
             if (!Modifier.isStatic(f.getModifiers()) || f.getType() != int.class) {
                 continue;
             }
-            if (!f.getName().startsWith("PRIORITY")) {
+            // "contains" rather than "startsWith": Samsung may prefix its own
+            // constants (SEM_PRIORITY_..., or a nested Priority holder).
+            if (!f.getName().toUpperCase(Locale.US).contains("PRIORITY")) {
                 continue;
             }
             try {
                 f.setAccessible(true);
                 ProbeState.VOTE_PRIORITY_NAMES.put(f.getInt(null), f.getName());
+                found++;
             } catch (Throwable ignored) {
                 // constant unreadable; the numeric value still shows in the log
             }
+        }
+        return found;
+    }
+
+    /**
+     * Last-resort inventory when no PRIORITY constants were found anywhere.
+     *
+     * <p>Without this the log just says {@code PRIORITY_?} and we cannot tell
+     * whether the harvest broke or Samsung moved the constants somewhere else.
+     */
+    private static void dumpAllStaticInts(Class<?> c) {
+        ProbeLog.postNow("---- every static int on " + c.getName() + " ----");
+        try {
+            for (Field f : c.getDeclaredFields()) {
+                if (!Modifier.isStatic(f.getModifiers()) || f.getType() != int.class) {
+                    continue;
+                }
+                try {
+                    f.setAccessible(true);
+                    ProbeLog.postNow("   " + f.getName() + " = " + f.getInt(null));
+                } catch (Throwable t) {
+                    ProbeLog.postNow("   " + f.getName() + " = <unreadable>");
+                }
+            }
+            for (Class<?> inner : c.getDeclaredClasses()) {
+                ProbeLog.postNow("   (inner class) " + inner.getName());
+            }
+        } catch (Throwable t) {
+            ProbeLog.postNow("   inventory failed: " + t);
+        }
+        ProbeLog.postNow("---- end static int inventory ----");
+    }
+
+    private static Class<?>[] safeInnerClasses(Class<?> c) {
+        try {
+            return c.getDeclaredClasses();
+        } catch (Throwable t) {
+            return new Class<?>[0];
         }
     }
 
@@ -448,6 +517,77 @@ public final class DisplayHooks {
         }
         ProbeLog.postNow("---- end SurfaceControl inventory ----");
         HookEngine.hookMatching(cl, SURFACE_CONTROL, Cfg.HOOKABLE_METHOD, true);
+        hookSamsungRestrictor(sc);
+    }
+
+    /**
+     * {@code SurfaceControl.restrictHighRefreshRate(boolean)}.
+     *
+     * <p>Found on the device, absent from AOSP - this is Samsung's own
+     * refresh-rate restrictor, the One UI 7 counterpart of the notifyHFRmode
+     * call LibreDeX found on One UI 8. The first capture showed it flipping to
+     * true and a vote landing on display 0 three milliseconds later, so it is
+     * either the cause or is driven by the same decision.
+     *
+     * <p>Plain argument logging is not enough here: a boolean tells us nothing
+     * about <em>who</em> decided. So this hook prints the call stack, which is
+     * what connects the restriction to whatever subsystem requested it - DeX,
+     * the power manager, or a settings observer. It is rare enough (a handful
+     * of calls per screen transition) to afford a stack trace.
+     */
+    private static void hookSamsungRestrictor(Class<?> surfaceControl) {
+        List<Method> methods = Reflect.methodsNamed(surfaceControl, "restrictHighRefreshRate");
+        if (methods.isEmpty()) {
+            ProbeLog.postNow("SurfaceControl.restrictHighRefreshRate absent on this firmware");
+            return;
+        }
+        for (Method m : methods) {
+            try {
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            String args = describeAll(param.args);
+                            if (!Throttle.changed("restrictHRR", args)) {
+                                return;
+                            }
+                            if (!Throttle.allow("restrictHRR", 40, Cfg.RATE_LIMIT_WINDOW_MS)) {
+                                return;
+                            }
+                            ProbeLog.post("RESTRICT-HRR restrictHighRefreshRate(%s)  <-- Samsung", args);
+                            ProbeState.record("restrictHighRefreshRate", args);
+                            logCallerStack();
+                        } catch (Throwable t) {
+                            HookEngine.reportOnce("restrictHRR", t);
+                        }
+                    }
+                });
+                ProbeLog.postNow("  hooked Samsung SurfaceControl." + Reflect.sig(m)
+                        + "  [with caller stack]");
+            } catch (Throwable t) {
+                ProbeLog.postNow("  restrictHighRefreshRate hook failed: " + t);
+            }
+        }
+    }
+
+    /** Print who called us, skipping our own frames. */
+    private static void logCallerStack() {
+        StackTraceElement[] frames = new Throwable().getStackTrace();
+        ProbeLog.post("   caller stack:");
+        int printed = 0;
+        for (StackTraceElement f : frames) {
+            String cn = f.getClassName();
+            if (cn.startsWith("com.tiimoo.dexrefresh")
+                    || cn.startsWith("de.robv.android.xposed")
+                    || cn.startsWith("org.lsposed")) {
+                continue;
+            }
+            ProbeLog.post("      at %s.%s(%s:%d)", cn, f.getMethodName(),
+                    f.getFileName(), f.getLineNumber());
+            if (++printed >= 25) {
+                break;
+            }
+        }
     }
 
     /**

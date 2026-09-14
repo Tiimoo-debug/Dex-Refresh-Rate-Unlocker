@@ -129,6 +129,16 @@ public final class Snapshots {
             sb.append("[dex-hints] failed: ").append(t).append('\n');
         }
 
+        // The priority table and SurfaceControl inventory are printed at boot,
+        // but the first device run showed boot output long gone from the logcat
+        // ring buffer by the time anyone looks. Repeat them in every snapshot so
+        // one capture is self-contained.
+        section(sb, "vote-priority-table", new Section() {
+            @Override
+            public String render() {
+                return dumpPriorityTable();
+            }
+        });
         section(sb, "displays", new Section() {
             @Override
             public String render() {
@@ -151,6 +161,12 @@ public final class Snapshots {
             @Override
             public String render() {
                 return dumpLastSeen();
+            }
+        });
+        section(sb, "samsung-surfacecontrol", new Section() {
+            @Override
+            public String render() {
+                return dumpSurfaceControlInventory();
             }
         });
 
@@ -388,6 +404,54 @@ public final class Snapshots {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * This firmware's own vote priority numbering.
+     *
+     * <p>Without it the vote log reads "priority=7(PRIORITY_?)" and there is no
+     * way to know whether 7 means what AOSP 15 calls 7.
+     */
+    private static String dumpPriorityTable() {
+        if (ProbeState.VOTE_PRIORITY_NAMES.isEmpty()) {
+            return "EMPTY - the harvest found no PRIORITY constants. Vote priority\n"
+                    + "numbers in the log are raw and cannot be trusted to match AOSP.\n"
+                    + "Check the boot log for the raw static-int inventory.\n";
+        }
+        List<Integer> keys = new ArrayList<>(ProbeState.VOTE_PRIORITY_NAMES.keySet());
+        Collections.sort(keys);
+        StringBuilder sb = new StringBuilder();
+        sb.append(keys.size()).append(" priorities on this firmware")
+                .append(" (AOSP 15 has 21, 0..20)\n");
+        for (Integer k : keys) {
+            sb.append(String.format(Locale.US, "   %3d = %s%n",
+                    k, ProbeState.VOTE_PRIORITY_NAMES.get(k)));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Samsung's non-AOSP SurfaceControl entry points.
+     *
+     * <p>restrictHighRefreshRate(boolean) turned up here on One UI 7 and is the
+     * most interesting thing the probe has found, so keep the inventory in front
+     * of us rather than only in the boot log.
+     */
+    private static String dumpSurfaceControlInventory() {
+        Class<?> sc = Reflect.cls(classLoader(), "android.view.SurfaceControl");
+        if (sc == null) {
+            return "SurfaceControl not found\n";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Method m : Reflect.methodsMatching(sc, Cfg.INTERESTING)) {
+            sb.append("   ").append(Reflect.sig(m)).append('\n');
+        }
+        String lastRestrict = ProbeState.LAST_SEEN.get("restrictHighRefreshRate");
+        if (lastRestrict != null) {
+            sb.append("   >> last restrictHighRefreshRate arg = ")
+                    .append(lastRestrict).append('\n');
+        }
+        return sb.length() == 0 ? "(no matching methods)\n" : sb.toString();
     }
 
     private static String dumpLastSeen() {
