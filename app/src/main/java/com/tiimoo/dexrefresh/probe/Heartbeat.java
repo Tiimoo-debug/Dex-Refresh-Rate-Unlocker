@@ -7,6 +7,9 @@ import com.tiimoo.dexrefresh.core.Dumper;
 import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
 
+import java.lang.reflect.Field;
+import java.util.List;
+
 /**
  * Periodic compact dump of the whole refresh-rate state.
  *
@@ -119,6 +122,14 @@ public final class Heartbeat {
                 }
             }
         }
+        String modes = ProbeState.LAST_SEEN.get("modes");
+        if (modes != null) {
+            sb.append("| modes=").append(modes).append(' ');
+        }
+        String rrMode = ProbeState.LAST_SEEN.get("refreshRateMode");
+        if (rrMode != null) {
+            sb.append("| refreshRateMode=").append(rrMode).append(' ');
+        }
         String committed = ProbeState.LAST_SEEN.get("committed");
         if (committed != null) {
             sb.append("| committed=").append(committed);
@@ -131,7 +142,14 @@ public final class Heartbeat {
     }
 
     /** Vote rendered short: kind plus whatever numbers it carries. */
-    private static String terse(Object vote) {
+    static String terse(Object vote) {
+        return terse(vote, 0);
+    }
+
+    /**
+     * @param depth recursion guard for CombinedVote, which nests other votes
+     */
+    private static String terse(Object vote, int depth) {
         if (vote == null) {
             return "null";
         }
@@ -140,6 +158,24 @@ public final class Heartbeat {
             int dollar = kind.lastIndexOf('$');
             if (dollar >= 0) {
                 kind = kind.substring(dollar + 1);
+            }
+            // CombinedVote wraps a List<Vote> and applies each in turn, so the
+            // wrapper's name says nothing about what it actually constrains.
+            // Printing only the wrapper is what hid the 60 Hz ceiling in run 2:
+            // the visible votes alone implied 120 Hz, yet 60 was committed, so
+            // the real constraint had to be inside one of these.
+            if (depth < 3) {
+                List<?> nested = nestedVotes(vote);
+                if (nested != null) {
+                    StringBuilder sb = new StringBuilder(kind).append('[');
+                    for (int i = 0; i < nested.size(); i++) {
+                        if (i > 0) {
+                            sb.append(' ');
+                        }
+                        sb.append(terse(nested.get(i), depth + 1));
+                    }
+                    return sb.append(']').toString();
+                }
             }
             Object min = Reflect.get(vote, "mMinRefreshRate");
             Object max = Reflect.get(vote, "mMaxRefreshRate");
@@ -163,6 +199,33 @@ public final class Heartbeat {
         } catch (Throwable t) {
             return "<?>";
         }
+    }
+
+    /** The List<Vote> inside a CombinedVote, whatever the field is called. */
+    private static List<?> nestedVotes(Object vote) {
+        for (Class<?> k = vote.getClass(); k != null && k != Object.class; k = k.getSuperclass()) {
+            Field[] fields;
+            try {
+                fields = k.getDeclaredFields();
+            } catch (Throwable t) {
+                return null;
+            }
+            for (Field f : fields) {
+                if (!List.class.isAssignableFrom(f.getType())) {
+                    continue;
+                }
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(vote);
+                    if (v instanceof List && !((List<?>) v).isEmpty()) {
+                        return (List<?>) v;
+                    }
+                } catch (Throwable ignored) {
+                    // not readable; keep looking
+                }
+            }
+        }
+        return null;
     }
 
     private static String num(Object o) {

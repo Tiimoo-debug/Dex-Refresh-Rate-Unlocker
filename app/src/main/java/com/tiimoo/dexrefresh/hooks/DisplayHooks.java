@@ -82,6 +82,7 @@ public final class DisplayHooks {
         hookSurfaceControl(cl);
         hookDisplayModeConstruction(cl);
         hookDisplayLifecycle(cl);
+        hookDisplayInfoCarriers(cl);
         hookAssortedByName(cl);
         ClassScout.logPresenceReport(cl);
         ProbeLog.postNow("==== system_server probes installed ====");
@@ -574,6 +575,56 @@ public final class DisplayHooks {
     }
 
     /**
+     * Capture the mode list and Samsung's refreshRateMode off any DisplayInfo
+     * that passes through.
+     *
+     * <p>Run 2 proved the panel has a 120 Hz mode (id 1, 1440x3088 @ 120.00001)
+     * and that mode 3 is being selected instead, but the mode array printed as
+     * a truncated blob. A compact "id@rate" list says at a glance which mode ids
+     * are the fast ones.
+     *
+     * <p>refreshRateMode is a Samsung addition to DisplayInfo, not AOSP. It read
+     * 2 while the panel sat at 60, which makes it a candidate for the Motion
+     * Smoothness setting - worth watching, not yet proven.
+     */
+    private static void captureDisplayInfo(Object info) {
+        if (info == null) {
+            return;
+        }
+        try {
+            Object rrMode = Reflect.get(info, "refreshRateMode");
+            if (rrMode != null) {
+                ProbeState.record("refreshRateMode", String.valueOf(rrMode));
+            }
+            Object modesObj = Reflect.get(info, "supportedModes");
+            if (!(modesObj instanceof Object[])) {
+                return;
+            }
+            Object[] modes = (Object[]) modesObj;
+            StringBuilder sb = new StringBuilder();
+            for (Object mode : modes) {
+                Object id = Reflect.call(mode, "getModeId");
+                Object rate = Reflect.call(mode, "getRefreshRate");
+                if (id == null || rate == null) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append(' ');
+                }
+                sb.append(id).append('@').append(Math.round(
+                        ((Number) rate).floatValue()));
+            }
+            Object active = Reflect.get(info, "modeId");
+            if (active != null) {
+                sb.append("  active=").append(active);
+            }
+            ProbeState.record("modes", sb.toString());
+        } catch (Throwable t) {
+            HookEngine.reportOnce("captureDisplayInfo", t);
+        }
+    }
+
+    /**
      * Remember the specs last pushed to SurfaceFlinger.
      *
      * <p>This is the ground truth for "what is the panel actually allowed to
@@ -675,6 +726,11 @@ public final class DisplayHooks {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         try {
+                            for (Object a : param.args == null ? new Object[0] : param.args) {
+                                if (a != null && a.getClass().getName().endsWith("DisplayInfo")) {
+                                    captureDisplayInfo(a);
+                                }
+                            }
                             ProbeLog.post("DISPLAY-EVENT %s(%s)%s", name,
                                     describeAll(param.args), identifyDevices(param.args));
                             Snapshots.requestDeferred("display-event:" + name);
@@ -691,6 +747,33 @@ public final class DisplayHooks {
     }
 
     /** Remaining classes worth watching, all optional. */
+    /** Any hooked method carrying a DisplayInfo feeds the mode-list capture. */
+    private static void hookDisplayInfoCarriers(ClassLoader cl) {
+        Class<?> ldd = Reflect.cls(cl, LOCAL_DISPLAY_DEVICE);
+        if (ldd == null) {
+            return;
+        }
+        for (Method m : Reflect.methodsNamed(ldd, "updateDisplayInfoForFrameRateOverride")) {
+            try {
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        if (param.args == null) {
+                            return;
+                        }
+                        for (Object a : param.args) {
+                            if (a != null && a.getClass().getName().endsWith("DisplayInfo")) {
+                                captureDisplayInfo(a);
+                            }
+                        }
+                    }
+                });
+            } catch (Throwable ignored) {
+                // best effort
+            }
+        }
+    }
+
     private static void hookAssortedByName(ClassLoader cl) {
         String[] classes = {
                 DMS,

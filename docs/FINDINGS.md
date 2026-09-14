@@ -95,6 +95,88 @@ What displays 2 and 7 actually are is still unknown — the log rendered them on
 as `DisplayDevice@hash`. That is now fixed: display events resolve name,
 uniqueId, type and flags.
 
+## Run 2 — the panel is capable, and the capper is hiding in a CombinedVote
+
+The heartbeat worked: it printed the full vote table, which is what run 1 could
+not do.
+
+### The panel can do 120 Hz at native resolution
+
+```
+supportedModes = Display$Mode[21]
+  id=1, 1440x3088, fps=120.00001, alternativeRefreshRates=[10, 24, 30, 48, 60, 96]
+active modeId = 3, defaultModeId = 3          <- a 60 Hz mode
+```
+
+So this is not a hardware or mode-list limitation. A 120 Hz mode at the native
+resolution exists and is simply not being selected. That rules out the
+"SupportedModesVote filtered the list" hypothesis entirely.
+
+### The vote table, with and without restrictHighRefreshRate
+
+```
+restrictHRR=true   d0{p5=RenderVote(120,inf) p7=RenderVote(60,inf) p10=CombinedVote
+                       p12=SizeVote(1440x3088) p13=RenderVote(0,120)}
+restrictHRR=false  d0{p5=RenderVote(120,inf)                       p10=CombinedVote
+                       p12=SizeVote(1440x3088) p13=RenderVote(0,120)}
+global             d-1{p11=CombinedVote p19=CombinedVote}   <- merged into every display
+
+committed true :   physical (60,60)  render (60,60)
+committed false:   physical (10,60)  render (0,60)
+```
+
+### Where the 60 Hz ceiling must be
+
+`RenderVote.updateSummary` narrows: the summary min is the max of all vote mins,
+the summary max is the min of all vote maxes. Taking only the votes visible
+above, d0 works out to min 120 / max 120 — which would select the 120 Hz mode.
+But 60 is what gets committed.
+
+So the ceiling is inside something not being printed, and there are only three
+candidates: the `CombinedVote` at p10 on d0, and the two **global** CombinedVotes
+at p11 and p19, which merge into every display. p19 is near the top of the
+priority range, which makes it the strongest suspect.
+
+`CombinedVote` holds a `List<Vote>` and applies each in turn, so the wrapper name
+says nothing about what it constrains. Printing only the wrapper is exactly what
+hid the answer. Fixed: votes now expand recursively, so a CombinedVote renders as
+`CombinedVote[RenderVote(0,60) SizeVote(...)]`.
+
+### Priority names are gone from this firmware, permanently
+
+The harvest still found nothing, and the stack traces explain why:
+
+```
+at s.intercept(r8-map-id-efedc8ef...)
+at l.proceed(r8-map-id-efedc8ef...)
+at android.content.FiedPriendlt.restrictHighRefreshRate(FiedPriendlt.java:-4)
+at com.android.server.wm.RootWindowContainer.applySurfaceChangesTransaction$1(qb/98275629...)
+```
+
+This framework is R8-optimised: classes renamed (`FiedPriendlt`, `s`, `l`, `q0`),
+and `static final int` constants inlined at their use sites and the field
+declarations dropped. `Vote.class.getDeclaredFields()` therefore has nothing to
+harvest — no probe change can recover the names. Priority meanings have to be
+inferred from each vote's behaviour instead, which the expanded rendering now
+makes possible.
+
+### What calls restrictHighRefreshRate
+
+Not DeX, on this evidence. Every call comes from
+`RootWindowContainer.applySurfaceChangesTransaction`, reached from
+`WindowManagerService.relayoutWindow` (a window relayout) or
+`DisplayContent.requestDisplayUpdate` (a display change) — and via a Samsung
+interceptor chain (`s.intercept` → `l.proceed` → `q0.callback`) wrapping the
+SurfaceControl call. That is a general WindowManager-driven decision, not a DeX
+code path. It flips with screen state and window changes, and the vote it files
+only raises the floor to 60.
+
+### A new lead: Samsung's DisplayInfo.refreshRateMode
+
+`refreshRateMode : int = 2` on display 0 — a Samsung field, not AOSP, sitting at
+2 while the panel is pinned to 60. Plausibly the Motion Smoothness setting. Now
+surfaced in the heartbeat so its value can be correlated against the setting.
+
 ## Changes made for run 2
 
 - **Property command channel**, replacing broadcasts as the primary trigger:
@@ -128,18 +210,28 @@ STATE* d0{p7=RenderVote(60,inf)} d2{} d7{} | committed=... | restrictHRR=true
 Every 10 s when it differs, plus a forced anchor every 60 s so a constant reads
 as a constant instead of as silence. Field reads only, no locks, no binder.
 
-## Open question for run 2
+## Changes made for run 3
 
-Before anything else: **is the phone set to Adaptive motion smoothness, and does
-it actually run at 120 Hz with DeX disconnected?** Every display showed a 60 Hz
-ceiling for the whole capture. Two explanations fit equally well so far:
+- **Votes expand recursively.** A `CombinedVote` now renders its contents, so
+  the three wrappers that currently hide the 60 Hz ceiling will show what they
+  actually constrain. This is the one change that should end the hunt.
+- **Compact mode list in the heartbeat** (`modes=1@120 2@96 3@60 ... active=3`),
+  instead of a mode array truncated at 3942 characters.
+- **Samsung's `DisplayInfo.refreshRateMode`** surfaced in the heartbeat.
 
-1. DeX caps everything to 60 — the hypothesis, and consistent with DeX being
-   active throughout.
-2. Motion smoothness is set to Standard, in which case 60 Hz is the global
-   setting and there is nothing DeX-specific in that log at all.
+## Open question after run 2
 
-The heartbeat distinguishes them without ambiguity: with the module running and
-DeX *disconnected*, a `STATE` line showing a 120 Hz ceiling proves (1); one
-still showing 60 proves (2). Check that before capturing the diff, because under
-(2) no amount of further instrumentation will find a DeX cap that is not there.
+Still unresolved, and still the first thing to settle: **is the 60 Hz ceiling
+DeX's doing, or global?**
+
+Run 2 did not answer it, because the ceiling was again 60 for the whole capture
+and the capture again did not span a DeX transition. But it is now cheap to
+answer: one `STATE` line with DeX **disconnected** settles it.
+
+- ceiling 120 → DeX is capping it, and the expanded CombinedVote will name the vote
+- ceiling still 60 → the cap is global, and Motion Smoothness is the thing to
+  check first, not DeX
+
+Note that the two global votes (p11, p19 on display -1) are present regardless of
+DeX and merge into every display. If the ceiling turns out to live in p19, that
+points at a global policy rather than anything DeX-specific.

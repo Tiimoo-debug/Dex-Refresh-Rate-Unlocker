@@ -371,6 +371,8 @@ public final class Snapshots {
                 Object vote = votes.valueAt(j);
                 sb.append(String.format(Locale.US, "   priority %3d %-34s %s%n",
                         priority, ProbeState.votePriorityName(priority),
+                        Heartbeat.terse(vote)));
+                sb.append(String.format(Locale.US, "       raw: %s%n",
                         Dumper.describe(vote, true)));
                 if (vote != null && depth > 1) {
                     sb.append(indent(Dumper.dump("      vote fields", vote,
