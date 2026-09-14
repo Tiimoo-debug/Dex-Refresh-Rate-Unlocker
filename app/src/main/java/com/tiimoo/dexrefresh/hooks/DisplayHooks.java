@@ -521,7 +521,7 @@ public final class DisplayHooks {
         ProbeLog.postNow("---- end SurfaceControl inventory ----");
         HookEngine.hookMatching(cl, SURFACE_CONTROL, Cfg.HOOKABLE_METHOD, true);
         hookSamsungRestrictor(sc);
-        recordCommittedSpecs(sc);
+        recordCommittedSpecs(cl);
     }
 
     /**
@@ -592,9 +592,19 @@ public final class DisplayHooks {
             return;
         }
         try {
+            // Key everything by display id. These used to be single keys, so
+            // whichever display passed through last overwrote the rest - and
+            // the built-in panel passes through constantly, which meant the
+            // external monitor's state was never visible at all.
+            Object displayId = Reflect.get(info, "displayId");
+            String key = displayId == null ? "?" : String.valueOf(displayId);
+            Object dName = Reflect.get(info, "name");
+            if (dName != null) {
+                ProbeState.record("name:" + key, String.valueOf(dName));
+            }
             Object rrMode = Reflect.get(info, "refreshRateMode");
             if (rrMode != null) {
-                ProbeState.record("refreshRateMode", String.valueOf(rrMode));
+                ProbeState.record("refreshRateMode:" + key, String.valueOf(rrMode));
             }
             Object modesObj = Reflect.get(info, "supportedModes");
             if (!(modesObj instanceof Object[])) {
@@ -618,7 +628,7 @@ public final class DisplayHooks {
             if (active != null) {
                 sb.append("  active=").append(active);
             }
-            ProbeState.record("modes", sb.toString());
+            ProbeState.record("modes:" + key, sb.toString());
         } catch (Throwable t) {
             HookEngine.reportOnce("captureDisplayInfo", t);
         }
@@ -631,17 +641,27 @@ public final class DisplayHooks {
      * do", and the heartbeat prints it alongside the votes so one line answers
      * the whole question.
      */
-    private static void recordCommittedSpecs(Class<?> surfaceControl) {
-        for (Method m : Reflect.methodsNamed(surfaceControl, "setDesiredDisplayModeSpecs")) {
+    private static void recordCommittedSpecs(ClassLoader cl) {
+        Class<?> ldd = Reflect.cls(cl, LOCAL_DISPLAY_DEVICE);
+        if (ldd == null) {
+            return;
+        }
+        for (Method m : Reflect.methodsNamed(ldd, "setDesiredDisplayModeSpecsLocked")) {
             try {
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
                         try {
-                            if (param.args != null && param.args.length > 1) {
-                                ProbeState.record("committed",
-                                        Dumper.describe(param.args[param.args.length - 1], true));
+                            if (param.args == null || param.args.length < 1) {
+                                return;
                             }
+                            // `this` is the display device, so the specs can be
+                            // attributed to a display. SurfaceControl's static
+                            // entry point only carries an opaque IBinder, which
+                            // is why committed specs were previously recorded
+                            // under one key for every display at once.
+                            ProbeState.record("committed:" + deviceLabel(param.thisObject),
+                                    Dumper.describe(param.args[0], true));
                         } catch (Throwable t) {
                             HookEngine.reportOnce("committed", t);
                         }
@@ -651,6 +671,23 @@ public final class DisplayHooks {
                 // already hooked for logging; recording is a bonus
             }
         }
+    }
+
+    /** Short identity for a DisplayDevice: its name, else its uniqueId. */
+    static String deviceLabel(Object device) {
+        if (device == null) {
+            return "?";
+        }
+        Object info = Reflect.get(device, "mCurrentDisplayDeviceInfo");
+        if (info == null) {
+            info = Reflect.get(device, "mDisplayDeviceInfo");
+        }
+        Object name = info == null ? null : Reflect.get(info, "name");
+        if (name != null) {
+            return String.valueOf(name);
+        }
+        Object uniqueId = Reflect.get(device, "mUniqueId");
+        return uniqueId == null ? "?" : String.valueOf(uniqueId);
     }
 
     /** Print who called us, skipping our own frames. */

@@ -95,10 +95,53 @@ What displays 2 and 7 actually are is still unknown — the log rendered them on
 as `DisplayDevice@hash`. That is now fixed: display events resolve name,
 uniqueId, type and flags.
 
-## Run 2 — the panel is capable, and the capper is hiding in a CombinedVote
+## Run 2 — most of this turned out to be about the wrong display
 
 The heartbeat worked: it printed the full vote table, which is what run 1 could
-not do.
+not do. But nearly every conclusion drawn from it concerned the **built-in
+phone panel**, not the external monitor that is the actual goal.
+
+Every DisplayInfo in the capture reads:
+
+```
+DisplayInfo{"Built-in Screen", displayId 0, real 1440 x 3088}
+```
+
+1440x3088 at a 120 Hz maximum is the phone. The target is a **144 Hz 2K external
+monitor**, which is one of displays 2 / 6 (it was 7 in run 1 — ids are assigned
+dynamically and move between sessions).
+
+So the findings below about display 0 are accurate but beside the point, and the
+external display produced almost no data at all.
+
+### Why the external display was invisible
+
+A bias in the probe, not in the device. Captured state was stored under single
+keys — `modes`, `committed`, `refreshRateMode` — so whichever display last passed
+through overwrote the others, and the built-in panel passes through constantly.
+The snapshot's getter loop was also hardcoded to display ids `{0, 1, 2}`, which
+never included the external display on this device.
+
+Fixed: everything is now keyed per display (`modes:6`, `committed:<device name>`,
+`name:6`), the heartbeat prints every display rather than one, and display ids
+come from the live vote map instead of a hardcoded list.
+
+### What the external display did show
+
+Only its votes, and only these:
+
+```
+d2{p5=RenderVote(120,inf) p10=CombinedVote p13=RenderVote(0,120)}
+d6{p5=RenderVote(120,inf) p10=CombinedVote p13=RenderVote(0,120)}
+```
+
+`p13 = RenderVote(0,120)` — a **120 Hz render ceiling on a 144 Hz panel**. That
+is the single most interesting line in the run and it is on the external display,
+not the phone. Whether it is the cap or merely tracks it is unresolved: no
+DisplayInfo, no mode list and no committed specs were captured for that display,
+so we do not yet know whether the framework even enumerates 144 Hz modes for it.
+
+### Findings that concern the built-in panel only
 
 ### The panel can do 120 Hz at native resolution
 
@@ -125,7 +168,7 @@ committed true :   physical (60,60)  render (60,60)
 committed false:   physical (10,60)  render (0,60)
 ```
 
-### Where the 60 Hz ceiling must be
+### Where display 0's 60 Hz ceiling must be
 
 `RenderVote.updateSummary` narrows: the summary min is the max of all vote mins,
 the summary max is the min of all vote maxes. Taking only the votes visible
@@ -221,8 +264,10 @@ as a constant instead of as silence. Field reads only, no locks, no binder.
 
 ## Open question after run 2
 
-Still unresolved, and still the first thing to settle: **is the 60 Hz ceiling
-DeX's doing, or global?**
+Reframed after run 2. The question is no longer about the phone panel's 60 Hz
+ceiling at all — that is the internal display and not what we are trying to
+unlock. The question is: **does the framework expose 144 Hz modes for the
+external monitor, and if so what holds it to 120?**
 
 Run 2 did not answer it, because the ceiling was again 60 for the whole capture
 and the capture again did not span a DeX transition. But it is now cheap to

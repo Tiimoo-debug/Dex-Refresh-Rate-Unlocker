@@ -27,6 +27,19 @@ anything else:
   exist on One UI 7, including which generation of the vote system it runs
   (Android 15 splits `Vote` into one class per vote kind)
 
+## 0. Know which display is which
+
+Display ids are assigned dynamically and move between sessions — the external
+monitor has been 6 and 7 on this device. The heartbeat now names every display:
+
+```
+STATE | names{0=Built-in Screen; 6=<your monitor>} | modes{0=1@120 ... ; 6=...}
+```
+
+The built-in panel is 1440x3088 at up to 120 Hz. **It is not the target.** Read
+the entry for the external display id, not display 0 — an easy mistake that cost
+a whole run.
+
 ## 1. Confirm there is something to measure
 
 With DeX **disconnected**, watch for a heartbeat line:

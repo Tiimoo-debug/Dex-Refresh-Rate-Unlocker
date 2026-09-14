@@ -393,7 +393,10 @@ public final class Snapshots {
         if (callGetters) {
             Method m = Reflect.method(dmd.getClass(), "getDesiredDisplayModeSpecs", int.class);
             if (m != null) {
-                for (int displayId : new int[]{0, 1, 2}) {
+                // Use the display ids that actually exist. This was hardcoded
+                // to {0,1,2}, so the external display - which has shown up as
+                // 6 and as 7 on this device - was never queried at all.
+                for (int displayId : knownDisplayIds()) {
                     try {
                         Object specs = m.invoke(dmd, displayId);
                         sb.append("getDesiredDisplayModeSpecs(").append(displayId)
@@ -454,6 +457,36 @@ public final class Snapshots {
                     .append(lastRestrict).append('\n');
         }
         return sb.length() == 0 ? "(no matching methods)\n" : sb.toString();
+    }
+
+    /** Display ids present in the vote map, plus 0 as a floor. */
+    private static int[] knownDisplayIds() {
+        java.util.TreeSet<Integer> ids = new java.util.TreeSet<Integer>();
+        ids.add(0);
+        try {
+            Object dmd = modeDirector();
+            Object storage = dmd == null ? null : Reflect.findByTypeFragment(dmd, "VotesStorage");
+            Object byDisplay = storage != null
+                    ? Reflect.findByTypeFragment(storage, "SparseArray")
+                    : null;
+            if (byDisplay instanceof SparseArray) {
+                SparseArray<?> outer = (SparseArray<?>) byDisplay;
+                for (int i = 0; i < outer.size(); i++) {
+                    int id = outer.keyAt(i);
+                    if (id >= 0) {
+                        ids.add(id);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // fall back to just display 0
+        }
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) {
+            out[i++] = id;
+        }
+        return out;
     }
 
     private static String dumpLastSeen() {

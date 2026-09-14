@@ -8,6 +8,8 @@ import com.tiimoo.dexrefresh.core.ProbeLog;
 import com.tiimoo.dexrefresh.core.Reflect;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -122,23 +124,41 @@ public final class Heartbeat {
                 }
             }
         }
-        String modes = ProbeState.LAST_SEEN.get("modes");
-        if (modes != null) {
-            sb.append("| modes=").append(modes).append(' ');
-        }
-        String rrMode = ProbeState.LAST_SEEN.get("refreshRateMode");
-        if (rrMode != null) {
-            sb.append("| refreshRateMode=").append(rrMode).append(' ');
-        }
-        String committed = ProbeState.LAST_SEEN.get("committed");
-        if (committed != null) {
-            sb.append("| committed=").append(committed);
-        }
+        // Every display, not just whichever one wrote last. The external
+        // monitor is the whole point of the exercise and was previously
+        // invisible here, drowned out by the built-in panel.
+        appendByPrefix(sb, "name:", "names");
+        appendByPrefix(sb, "modes:", "modes");
+        appendByPrefix(sb, "refreshRateMode:", "rrMode");
+        appendByPrefix(sb, "committed:", "committed");
         String restrict = ProbeState.LAST_SEEN.get("restrictHighRefreshRate");
         if (restrict != null) {
             sb.append(" | restrictHRR=").append(restrict);
         }
         return sb.toString();
+    }
+
+    /** Append every recorded entry sharing a prefix, sorted for stable diffs. */
+    private static void appendByPrefix(StringBuilder sb, String prefix, String label) {
+        List<String> keys = new ArrayList<String>();
+        for (String k : ProbeState.LAST_SEEN.keySet()) {
+            if (k.startsWith(prefix)) {
+                keys.add(k);
+            }
+        }
+        if (keys.isEmpty()) {
+            return;
+        }
+        Collections.sort(keys);
+        sb.append("| ").append(label).append('{');
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                sb.append("; ");
+            }
+            sb.append(keys.get(i).substring(prefix.length())).append('=')
+                    .append(ProbeState.LAST_SEEN.get(keys.get(i)));
+        }
+        sb.append("} ");
     }
 
     /** Vote rendered short: kind plus whatever numbers it carries. */
