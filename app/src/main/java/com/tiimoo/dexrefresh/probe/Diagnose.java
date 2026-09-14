@@ -1,0 +1,206 @@
+package com.tiimoo.dexrefresh.probe;
+
+import android.util.SparseArray;
+
+import com.tiimoo.dexrefresh.core.ProbeLog;
+import com.tiimoo.dexrefresh.core.Reflect;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * "Why is this display not running at its maximum?"
+ *
+ * <p>Written after getting it wrong by eye. Having found the global 60 Hz vote
+ * at priority 19, it was easy to miss that priority 11 sits in the same global
+ * bucket capping physical refresh at 120 — so a recommendation to drop the
+ * per-display 120 caps left the monitor at 120 anyway, because the global one
+ * was still standing.
+ *
+ * <p>Reading a vote table by eye does not scale: votes arrive per display and
+ * globally, nest inside CombinedVotes, and constrain physical and render rates
+ * separately. This walks the lot and reports exactly which votes hold a display
+ * below the fastest mode it advertises — including the global ones, which is
+ * the part that is easy to forget.
+ */
+public final class Diagnose {
+
+    private Diagnose() {
+    }
+
+    private static final int GLOBAL_ID = -1;
+
+    public static void explain(int displayId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n===== why is display ").append(displayId)
+                .append(" not at its maximum? =====\n");
+
+        ModeInfo modes = parseModes(ProbeState.LAST_SEEN.get("modes:" + displayId));
+        if (modes == null) {
+            sb.append("No mode list recorded for display ").append(displayId)
+                    .append(". Dock it, wait for a STATE line, then retry.\n");
+            ProbeLog.postBlock(sb.toString());
+            return;
+        }
+        String name = ProbeState.LAST_SEEN.get("name:" + displayId);
+        sb.append("display: ").append(name == null ? "?" : name).append('\n');
+        sb.append("fastest mode advertised: ").append(modes.maxId)
+                .append(" @ ").append(modes.maxRate).append(" Hz\n");
+        sb.append("currently active mode:   ").append(modes.activeId)
+                .append(" @ ").append(modes.activeRate).append(" Hz\n");
+
+        if (modes.activeRate >= modes.maxRate) {
+            sb.append("\nAlready at the maximum this display advertises.\n");
+            sb.append("If measured frame rate is still lower, the limit is no longer "
+                    + "in the vote table - look at render rate or the app itself.\n");
+            ProbeLog.postBlock(sb.toString());
+            return;
+        }
+
+        List<String> blockers = new ArrayList<String>();
+        collectBlockers(displayId, modes.maxRate, blockers);
+        collectBlockers(GLOBAL_ID, modes.maxRate, blockers);
+
+        if (blockers.isEmpty()) {
+            sb.append("\nNo vote caps this display below ").append(modes.maxRate)
+                    .append(" Hz.\n")
+                    .append("The limit is somewhere other than the vote table.\n");
+        } else {
+            sb.append("\nVotes holding it below ").append(modes.maxRate).append(" Hz:\n");
+            StringBuilder spec = new StringBuilder();
+            for (String b : blockers) {
+                sb.append("   ").append(b).append('\n');
+                int colon = b.indexOf(' ');
+                if (colon > 0) {
+                    if (spec.length() > 0) {
+                        spec.append(',');
+                    }
+                    spec.append(b.substring(0, colon));
+                }
+            }
+            sb.append("\nTo drop all of them:\n");
+            sb.append("   setprop debug.dexrr.cmd \"unlock ").append(spec).append("\"\n");
+            sb.append("Global entries are written as -1:<priority> and per-display ones "
+                    + "as <id>:<priority>;\nprefer * over a fixed id for displays that "
+                    + "get re-created, such as HDMI.\n");
+        }
+        ProbeLog.postBlock(sb.toString());
+    }
+
+    /** Add "d:p  <rendered vote>" for each vote on this display capping below max. */
+    private static void collectBlockers(int displayId, float maxRate, List<String> out) {
+        SparseArray<?> votes = votesFor(displayId);
+        if (votes == null) {
+            return;
+        }
+        for (int i = 0; i < votes.size(); i++) {
+            int priority = votes.keyAt(i);
+            Object vote = votes.valueAt(i);
+            if (capsBelow(vote, maxRate, 0)) {
+                out.add(String.format(Locale.US, "%d:%d  %s%s",
+                        displayId, priority, Heartbeat.terse(vote),
+                        displayId == GLOBAL_ID ? "   <- GLOBAL, applies to every display" : ""));
+            }
+        }
+    }
+
+    private static SparseArray<?> votesFor(int displayId) {
+        try {
+            Object dmd = Snapshots.modeDirector();
+            Object storage = dmd == null ? null : Reflect.findByTypeFragment(dmd, "VotesStorage");
+            Object byDisplay = storage != null
+                    ? Reflect.findByTypeFragment(storage, "SparseArray")
+                    : null;
+            if (!(byDisplay instanceof SparseArray)) {
+                return null;
+            }
+            Object inner = ((SparseArray<?>) byDisplay).get(displayId);
+            return inner instanceof SparseArray ? (SparseArray<?>) inner : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** True if this vote, or one nested in it, caps a rate below {@code maxRate}. */
+    private static boolean capsBelow(Object vote, float maxRate, int depth) {
+        if (vote == null || depth > 3) {
+            return false;
+        }
+        try {
+            Object max = Reflect.get(vote, "mMaxRefreshRate");
+            if (max instanceof Number) {
+                float v = ((Number) max).floatValue();
+                if (v > 0f && v < maxRate) {
+                    return true;
+                }
+            }
+            for (Class<?> k = vote.getClass(); k != null && k != Object.class;
+                    k = k.getSuperclass()) {
+                for (Field f : k.getDeclaredFields()) {
+                    if (!List.class.isAssignableFrom(f.getType())) {
+                        continue;
+                    }
+                    f.setAccessible(true);
+                    Object nested = f.get(vote);
+                    if (!(nested instanceof List)) {
+                        continue;
+                    }
+                    for (Object child : (List<?>) nested) {
+                        if (capsBelow(child, maxRate, depth + 1)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // undiagnosable; better to under-report than to crash
+        }
+        return false;
+    }
+
+    private static final class ModeInfo {
+        int maxId;
+        float maxRate;
+        int activeId;
+        float activeRate;
+    }
+
+    /** Parse the recorded "86@60 87@144 88@120  active=88" form. */
+    private static ModeInfo parseModes(String recorded) {
+        if (recorded == null || recorded.isEmpty()) {
+            return null;
+        }
+        ModeInfo info = new ModeInfo();
+        info.activeId = -1;
+        SparseArray<Float> rates = new SparseArray<Float>();
+        for (String token : recorded.trim().split("\\s+")) {
+            try {
+                if (token.startsWith("active=")) {
+                    info.activeId = Integer.parseInt(token.substring(7));
+                    continue;
+                }
+                int at = token.indexOf('@');
+                if (at <= 0) {
+                    continue;
+                }
+                int id = Integer.parseInt(token.substring(0, at));
+                float rate = Float.parseFloat(token.substring(at + 1));
+                rates.put(id, rate);
+                if (rate > info.maxRate) {
+                    info.maxRate = rate;
+                    info.maxId = id;
+                }
+            } catch (NumberFormatException ignored) {
+                // skip unparseable token
+            }
+        }
+        if (rates.size() == 0) {
+            return null;
+        }
+        Float active = rates.get(info.activeId);
+        info.activeRate = active == null ? 0f : active;
+        return info;
+    }
+}

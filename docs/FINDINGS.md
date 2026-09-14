@@ -396,14 +396,29 @@ whenever the phone screen came on.
 ### What still caps at 120
 
 ```
-d9{ p5 =RenderVote(120,inf)
-    p10=CombinedVote[PhysicalVote(0,120) DisableRefreshRateSwitchingVote]
-    p13=RenderVote(0,120) }
+d-1{ p11=CombinedVote[PhysicalVote(10,120) DisableRefreshRateSwitchingVote] }  <- GLOBAL
+d9 { p5 =RenderVote(120,inf)
+     p10=CombinedVote[PhysicalVote(0,120) DisableRefreshRateSwitchingVote]
+     p13=RenderVote(0,120) }
 ```
 
-`p10` caps **physical** refresh at 120, which puts mode 87 @ 144 out of reach.
-`p13` caps **render** at 120. Both look like the phone panel's maximum being
-applied to an external display that exceeds it.
+Three caps, not two, and the first one is easy to miss:
+
+- **`-1:11` is global** and caps physical refresh at 120 on every display. On its
+  own it is enough to hold the monitor at 120 no matter what the per-display
+  votes say.
+- `9:10` caps physical at 120 for that display.
+- `9:13` caps **render** at 120.
+
+Dropping only the per-display pair leaves the global one standing and the
+monitor stays at 120 — which is precisely what happened on the first attempt at
+144. Having found the global 60 Hz cap at priority 19 it was easy to overlook
+priority 11 sitting in the same global bucket.
+
+That is what `why <displayId>` now exists for: it walks the per-display *and*
+global votes, expands nested CombinedVotes, and reports every vote holding a
+display below the fastest mode it advertises, with the exact `unlock` spec to
+drop them. Reading a vote table by eye does not scale.
 
 ### Display ids are not stable
 
@@ -412,15 +427,17 @@ re-created on every mode change. A rule pinned to one id works once and then
 silently stops working after a redock. Hence wildcard targeting:
 
 ```sh
-su -c 'setprop debug.dexrr.cmd "unlock -1:19,*:10,*:13"'
+su -c 'setprop debug.dexrr.cmd "unlock -1:19,-1:11,*:10,*:13"'
 ```
 
-`*:P` drops priority P on every display, however the ids are renumbered.
+`*:P` drops priority P on every display, however the ids are renumbered. The
+global entries are written explicitly as `-1:` because the global bucket is
+always display -1 and never churns.
 
 ### Making it permanent
 
 ```sh
-su -c 'setprop persist.dexrr.unlock "-1:19,*:10,*:13"'
+su -c 'setprop persist.dexrr.unlock "-1:19,-1:11,*:10,*:13"'
 ```
 
 Read and applied at boot. `setprop persist.dexrr.unlock ""` stops it.

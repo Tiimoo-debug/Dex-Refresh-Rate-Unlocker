@@ -141,7 +141,8 @@ reboot clears it:
 
 ```sh
 su -c 'setprop debug.dexrr.cmd "unlock -1:19"'        # this session only
-su -c 'setprop debug.dexrr.cmd "unlock -1:19,*:10,*:13"'  # aim for 144 Hz
+su -c 'setprop debug.dexrr.cmd "why 9"'               # what caps display 9
+su -c 'setprop debug.dexrr.cmd "unlock -1:19,-1:11,*:10,*:13"'  # aim for 144 Hz
 su -c 'setprop debug.dexrr.cmd "unlock off"'
 su -c 'setprop persist.dexrr.unlock "-1:19"'          # applied at every boot
 ```

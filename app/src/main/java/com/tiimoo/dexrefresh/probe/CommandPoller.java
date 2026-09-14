@@ -23,6 +23,7 @@ import java.util.Locale;
  *   su -c 'setprop debug.dexrr.cmd "votes"'
  *   su -c 'setprop debug.dexrr.cmd "scout"'
  *   su -c 'setprop debug.dexrr.cmd "class com.android.server.display.mode.Vote"'
+ *   su -c 'setprop debug.dexrr.cmd "why 9"'            what caps display 9
  *   su -c 'setprop debug.dexrr.cmd "unlock -1:19"'     drop a capping vote
  *   su -c 'setprop debug.dexrr.cmd "unlock off"'
  * </pre>
@@ -114,6 +115,20 @@ public final class CommandPoller {
             Snapshots.request(parts.length > 1 ? parts[1] : "votes-only", 2, false);
             return;
         }
+        if ("why".equals(verb) && parts.length > 1) {
+            try {
+                final int displayId = Integer.parseInt(parts[1]);
+                Snapshots.runLater(0, new Runnable() {
+                    @Override
+                    public void run() {
+                        Diagnose.explain(displayId);
+                    }
+                });
+            } catch (NumberFormatException e) {
+                ProbeLog.post("why: '%s' is not a display id", parts[1]);
+            }
+            return;
+        }
         if ("unlock".equals(verb)) {
             Unlock.configure(parts.length > 1 ? parts[1] : "off");
             return;
@@ -144,7 +159,8 @@ public final class CommandPoller {
             return;
         }
         ProbeLog.post("unknown command '%s' (try: snapshot <label> | votes | scout"
-                + " | class <fqcn> | unlock <display:priority,...> | unlock off)", value);
+                + " | class <fqcn> | why <displayId>"
+                + " | unlock <display:priority,...> | unlock off)", value);
     }
 
     private static Method propertyGetter(ClassLoader cl) {
