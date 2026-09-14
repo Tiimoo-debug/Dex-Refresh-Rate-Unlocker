@@ -253,8 +253,75 @@ STATE* d0{p7=RenderVote(60,inf)} d2{} d7{} | committed=... | restrictHRR=true
 Every 10 s when it differs, plus a forced anchor every 60 s so a constant reads
 as a constant instead of as silence. Field reads only, no locks, no binder.
 
-## Changes made for run 3
+## Run 3 — answered. The cap is a global 60 Hz physical vote.
 
+Displays finally identified, and the monitor's mode list obtained:
+
+```
+0 = "Built-in Screen"  1@120 2@96 3@60 ...              active=3   (60)
+2 = "Desktop"          43@60  and nothing else          active=43  (60)
+6 = "HDMI Screen"      22@60 23@144 24@120 25@100 ...   active=22  (60)   [stale]
+7 = "HDMI Screen"      44@60 45@144 46@120 47@100 ...   active=44  (60)
+```
+
+**The monitor exposes 144 Hz.** Mode 45 on display 7 (23 on the stale 6). The
+framework enumerates it correctly, and the display is running its 60 Hz mode
+instead. So this is not an EDID or mode-enumeration problem, and the fix belongs
+at the vote layer after all.
+
+### The cap
+
+```
+d-1 (GLOBAL - merged into every display):
+  p11 = CombinedVote[PhysicalVote(10,120) DisableRefreshRateSwitchingVote]
+  p19 = CombinedVote[PhysicalVote(0,60)   DisableRefreshRateSwitchingVote]
+```
+
+`p19` is a **global physical refresh-rate cap of 60 Hz**, paired with
+`DisableRefreshRateSwitchingVote`, at a very high priority (AOSP's maximum is
+20). Global votes merge into every display's summary, so this pins the 144 Hz
+monitor — and everything else — to 60 Hz and forbids switching.
+
+This is what the earlier runs could not see: it never changes, so change-triggered
+logging never printed it, and it was wrapped in a `CombinedVote` whose contents
+were not being expanded.
+
+### A second cap sits behind it
+
+```
+d7 = p5=RenderVote(120,inf)
+     p10=CombinedVote[PhysicalVote(0,120) DisableRefreshRateSwitchingVote]
+     p13=RenderVote(0,120)
+```
+
+Even with the global 60 removed, `p10` and `p13` cap this display at **120**, not
+144 — the phone panel's maximum applied to an external display that can do more.
+Reaching 144 therefore needs both layers addressed, not just the obvious one.
+
+### A third thing, for the DeX desktop specifically
+
+Display 2 is `"Desktop"`, uniqueId `virtual:android,1000,Desktop,0` — a virtual
+display created by system_server — and it has **exactly one mode, 43 @ 60 Hz**.
+Whatever is composited into that virtual display is produced at 60 Hz regardless
+of what the monitor is doing. This is the same class of problem LibreDeX hit and
+solved by patching the virtual display's advertised mode.
+
+### Prime suspect for the global vote
+
+`refreshRateMode = 2` on every display, and a global `PhysicalVote(0,60)` with
+switching disabled, is exactly what **Motion Smoothness set to Standard** would
+produce. That is a free test and it has to be ruled out before any code is
+written to defeat the vote — writing a hook to override a setting the user can
+simply change would be absurd.
+
+Run 4 now prints the caller stack whenever a global vote or a vote capping
+physical refresh below 120 is filed, which will name the subsystem responsible
+either way.
+
+## Changes made for run 4
+
+- **Caller stack on global and physical-capping votes**, the change that should
+  name whatever files the global 60 Hz cap.
 - **Votes expand recursively.** A `CombinedVote` now renders its contents, so
   the three wrappers that currently hide the 60 Hz ceiling will show what they
   actually constrain. This is the one change that should end the hunt.
@@ -262,12 +329,14 @@ as a constant instead of as silence. Field reads only, no locks, no binder.
   instead of a mode array truncated at 3942 characters.
 - **Samsung's `DisplayInfo.refreshRateMode`** surfaced in the heartbeat.
 
-## Open question after run 2
+## Open question after run 3
 
-Reframed after run 2. The question is no longer about the phone panel's 60 Hz
-ceiling at all — that is the internal display and not what we are trying to
-unlock. The question is: **does the framework expose 144 Hz modes for the
-external monitor, and if so what holds it to 120?**
+Answered by run 3: the framework does expose 144 Hz for the monitor, and a
+global `PhysicalVote(0,60)` holds everything to 60.
+
+What remains is **who files that vote**, and whether it is simply the Motion
+Smoothness setting. Check the setting first; the caller stack added for run 4
+answers it definitively either way.
 
 Run 2 did not answer it, because the ceiling was again 60 for the whole capture
 and the capture again did not span a DeX transition. But it is now cheap to

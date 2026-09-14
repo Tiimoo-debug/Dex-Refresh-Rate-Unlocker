@@ -162,7 +162,7 @@ public final class Heartbeat {
     }
 
     /** Vote rendered short: kind plus whatever numbers it carries. */
-    static String terse(Object vote) {
+    public static String terse(Object vote) {
         return terse(vote, 0);
     }
 

@@ -461,13 +461,74 @@ public final class DisplayHooks {
             return;
         }
         ProbeState.record(key, rendered);
-        ProbeLog.post("VOTE %s display=%d priority=%d(%s) -> %s%s",
+        ProbeLog.post("VOTE %s display=%d priority=%d -> %s%s",
                 action, displayId, priority,
-                ProbeState.votePriorityName(priority), rendered,
+                Heartbeat.terse(vote),
                 prev == null ? "" : "   [was " + prev + "]");
         if (vote != null) {
             ProbeLog.postBlock(Dumper.dumpShallow("      vote", vote));
         }
+        // The caller stack is what cracked restrictHighRefreshRate, and the
+        // same trick answers the question run 3 left open: a GLOBAL
+        // PhysicalVote(0,60) caps every display including the 144 Hz monitor,
+        // and a boolean vote object does not say who filed it. Traced only for
+        // global votes and for votes that actually cap physical refresh below
+        // 120, so this stays quiet on the per-frame traffic.
+        if (vote != null && shouldTraceVote(displayId, vote)
+                && Throttle.allow("votetrace:" + displayId + ":" + priority, 6,
+                        Cfg.RATE_LIMIT_WINDOW_MS)) {
+            ProbeLog.post("   ^ filed by:");
+            logCallerStack();
+        }
+    }
+
+    private static boolean shouldTraceVote(int displayId, Object vote) {
+        if (displayId == GLOBAL_DISPLAY_ID) {
+            return true;
+        }
+        return capsPhysicalBelow(vote, 120f, 0);
+    }
+
+    /**
+     * True when this vote (or one nested inside a CombinedVote) is a physical
+     * refresh-rate vote whose maximum is below {@code threshold}.
+     */
+    private static boolean capsPhysicalBelow(Object vote, float threshold, int depth) {
+        if (vote == null || depth > 3) {
+            return false;
+        }
+        try {
+            if (vote.getClass().getName().contains("Physical")) {
+                Object max = Reflect.get(vote, "mMaxRefreshRate");
+                if (max instanceof Number) {
+                    float v = ((Number) max).floatValue();
+                    if (v > 0f && v < threshold) {
+                        return true;
+                    }
+                }
+            }
+            for (Class<?> k = vote.getClass(); k != null && k != Object.class;
+                    k = k.getSuperclass()) {
+                for (Field f : k.getDeclaredFields()) {
+                    if (!java.util.List.class.isAssignableFrom(f.getType())) {
+                        continue;
+                    }
+                    f.setAccessible(true);
+                    Object nested = f.get(vote);
+                    if (!(nested instanceof java.util.List)) {
+                        continue;
+                    }
+                    for (Object child : (java.util.List<?>) nested) {
+                        if (capsPhysicalBelow(child, threshold, depth + 1)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // not traceable; no trace is better than a crash
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------
