@@ -2,13 +2,13 @@
 
 ## The hypothesis
 
-On Android 14, `DisplayModeDirector` decides the allowed refresh-rate range for
+On Android 15, `DisplayModeDirector` decides the allowed refresh-rate range for
 each display by collecting `Vote`s. Each vote is filed under a priority; the
 final range is their intersection, and higher priorities win outright above a
 cutoff. Two entry points file votes:
 
 ```java
-// com.android.server.display.mode.VotesStorage  (verified, AOSP 14)
+// com.android.server.display.mode.VotesStorage  (verified, AOSP 15 and 14)
 void updateVote(int displayId, int priority, Vote vote);
 void updateGlobalVote(int priority, Vote vote);      // displayId == -1
 ```
@@ -27,16 +27,17 @@ or the DeX apps requesting it for their own windows.
 ## Verification already done
 
 This module was written without an Android SDK available, so its assumptions
-were checked against a real Android 14 framework jar
-(`org.robolectric:android-all:14-robolectric-10818077`, which ships the actual
-`com.android.server.*` classes) rather than from memory:
+were checked against real framework jars (`org.robolectric:android-all`, which
+ship the actual `com.android.server.*` classes) rather than from memory. Both
+**Android 15 / API 35** (`15-robolectric-13954326`, the real target) and
+Android 14 were checked, because the vote system changed between them:
 
-- The full source set typechecks against Android 14.
-- The discovery logic was dry-run against real AOSP 14 bytecode: which methods
+- The full source set typechecks against both.
+- The discovery logic was dry-run against real bytecode from both: which methods
   each regex selects, how each vote entry point is classified, and whether the
   priority-constant harvest works.
 
-That dry-run caught four real bugs, all fixed:
+That dry-run caught five real bugs, all fixed:
 
 1. `SurfaceControl` has `private static native nativeSetDesiredDisplayModeSpecs`,
    which matched the hook regex. Hooking a JNI native is unsupported and would
@@ -47,50 +48,84 @@ That dry-run caught four real bugs, all fixed:
    arguments off by one position and mislabelled every global vote — the votes
    most likely to carry a panel-wide cap.
 3. The snapshot trigger regex missed `onDisplayDeviceEventLocked` and
-   `onDisplayDeviceChangedLocked`, the methods AOSP 14 actually uses. Automatic
-   snapshots would never have fired.
-4. The hook regex missed `updateDisplayModesLocked` and Android 14's
-   `requestDisplayStateInternal` (the modern name for `requestDisplayPower`).
+   `onDisplayDeviceChangedLocked`, the methods the framework actually uses.
+   Automatic snapshots would never have fired.
+4. The hook regex missed `updateDisplayModesLocked` and
+   `requestDisplayStateInternal`.
+5. The whole thing was originally aimed at Android 14. One UI 7 is **Android
+   15**, where `Vote` stopped being a concrete class and became an interface
+   with one implementation per vote kind, and where the priority numbering
+   shifted by up to six places. Re-verifying against API 35 is what surfaced
+   the priority table below.
 
-**This is not the same as having run on the device.** AOSP 14 is the baseline
-One UI 7 diverges *from*; the point of the probe is to measure that divergence.
+Because everything resolves reflectively with per-name fallbacks, the module
+works against either generation; the Android 15 numbers are the ones that
+matter here.
 
-## AOSP 14 vote priority baseline
+## AOSP 15 vote priority baseline
 
-Harvested from the framework jar. Diff this against what the module prints at
-boot — the difference is Samsung's.
+Harvested from the API 35 framework jar. Diff this against what the module
+prints at boot — the difference is Samsung's.
 
 ```
   0 = PRIORITY_DEFAULT_RENDER_FRAME_RATE
   1 = PRIORITY_FLICKER_REFRESH_RATE
   2 = PRIORITY_HIGH_BRIGHTNESS_MODE
   3 = PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE
-  4 = PRIORITY_APP_REQUEST_RENDER_FRAME_RATE_RANGE
-  5 = PRIORITY_APP_REQUEST_BASE_MODE_REFRESH_RATE
-  6 = PRIORITY_APP_REQUEST_SIZE
-  7 = PRIORITY_USER_SETTING_PEAK_RENDER_FRAME_RATE
-  8 = PRIORITY_AUTH_OPTIMIZER_RENDER_FRAME_RATE
-  9 = PRIORITY_LAYOUT_LIMITED_FRAME_RATE
- 10 = PRIORITY_LOW_POWER_MODE
- 11 = PRIORITY_FLICKER_REFRESH_RATE_SWITCH
- 12 = PRIORITY_SKIN_TEMPERATURE
- 13 = PRIORITY_PROXIMITY
- 14 = PRIORITY_UDFPS
-      MIN_PRIORITY = 0, MAX_PRIORITY = 14
-      APP_REQUEST_REFRESH_RATE_RANGE_PRIORITY_CUTOFF = 4
+  4 = PRIORITY_USER_SETTING_DISPLAY_PREFERRED_SIZE
+  5 = PRIORITY_APP_REQUEST_RENDER_FRAME_RATE_RANGE
+  6 = PRIORITY_APP_REQUEST_BASE_MODE_REFRESH_RATE
+  7 = PRIORITY_APP_REQUEST_SIZE
+  8 = PRIORITY_USER_SETTING_PEAK_REFRESH_RATE
+  9 = PRIORITY_USER_SETTING_PEAK_RENDER_FRAME_RATE
+ 10 = PRIORITY_SYNCHRONIZED_REFRESH_RATE
+ 11 = PRIORITY_LIMIT_MODE
+ 12 = PRIORITY_AUTH_OPTIMIZER_RENDER_FRAME_RATE
+ 13 = PRIORITY_LAYOUT_LIMITED_FRAME_RATE
+ 14 = PRIORITY_SYSTEM_REQUESTED_MODES
+ 15 = PRIORITY_LOW_POWER_MODE_MODES
+ 16 = PRIORITY_LOW_POWER_MODE_RENDER_RATE
+ 17 = PRIORITY_FLICKER_REFRESH_RATE_SWITCH
+ 18 = PRIORITY_SKIN_TEMPERATURE
+ 19 = PRIORITY_PROXIMITY
+ 20 = PRIORITY_UDFPS
+      MIN_PRIORITY = 0, MAX_PRIORITY = 20
+      APP_REQUEST_REFRESH_RATE_RANGE_PRIORITY_CUTOFF = 5
 ```
+
+On Android 15 a `Vote` is an interface, and each kind is its own class:
+`RefreshRateVote$PhysicalVote`, `RefreshRateVote$RenderVote`, `SizeVote`,
+`BaseModeRefreshRateVote`, `DisableRefreshRateSwitchingVote`,
+`SupportedModesVote`, `SupportedRefreshRatesVote`, `RequestedRefreshRateVote`,
+`CombinedVote`. The class name alone tells you what kind of restriction a vote
+is, which makes the log considerably easier to read than on Android 14.
+
+Two are worth watching specifically, because they can remove modes rather than
+merely narrow a range: `SupportedModesVote` (a literal allow-list of mode ids)
+and `PRIORITY_SYSTEM_REQUESTED_MODES`, fed by
+`DisplayModeDirector.requestDisplayModes(IBinder, int, int[])` — an Android 15
+addition and an obvious way for a DeX service to restrict the panel.
 
 ### Why LibreDeX's numbers do not transfer
 
-LibreDeX drops priorities **15** (`PRIORITY_SYNCHRONIZED_REFRESH_RATE`) and
-**22** (`PRIORITY_LOW_POWER_MODE_MODES`). Neither exists in Android 14, where
-the range stops at 14. Copying those constants here would drop whatever One UI 7
-happens to have numbered 15 and 22 — if anything — which is why the module reads
-the table off the device instead of hardcoding it.
+LibreDeX drops priorities **15** and **22**, which on their Android 16 / One UI 8
+target mean `PRIORITY_SYNCHRONIZED_REFRESH_RATE` and
+`PRIORITY_LOW_POWER_MODE_MODES`. On Android 15 those two concepts are numbered
+**10** and **15**, and `MAX_PRIORITY` is 20.
 
-Samsung very likely adds priorities above 14. Any priority the module reports
-that is not in the list above is a Samsung addition and is immediately
-interesting.
+So copying their constants here would drop priority 15 — which on this device is
+`PRIORITY_LOW_POWER_MODE_MODES`, the right idea but reached by accident and not
+the vote they meant by 15 — and priority 22, which does not exist at all and
+would silently do nothing. That is exactly why the module reads the table off
+the device instead of hardcoding it.
+
+The *names* are worth carrying over as hypotheses even though the numbers are
+not: `PRIORITY_SYNCHRONIZED_REFRESH_RATE` and `PRIORITY_LOW_POWER_MODE_MODES`
+were the culprits on One UI 8, and both exist on Android 15. Check them first in
+the diff — but confirm from the log rather than assuming.
+
+Samsung may add priorities above 20. Any priority the module reports that is not
+in the list above is a Samsung addition and is immediately interesting.
 
 ## Hook inventory
 
@@ -98,11 +133,14 @@ Resolved by reflection; anything absent is logged and skipped.
 
 **Vote path (the primary target)**
 - `VotesStorage.updateVote` / `updateGlobalVote` / `removeVote` / `removeAllVotes`
-- fallback for a pre-Android-14 layout: `DisplayModeDirector.updateVoteLocked`
+- fallback for the pre-Android-14 layout: `DisplayModeDirector.updateVoteLocked`
 
 **Decision**
-- `DisplayModeDirector.getDesiredDisplayModeSpecs(int)`, `selectBaseMode`,
-  `getMaxRefreshRateLocked`, `notifyDesiredDisplayModeSpecsChangedLocked`
+- `DisplayModeDirector.getDesiredDisplayModeSpecs(int)`, `getMaxRefreshRateLocked`,
+  `notifyDesiredDisplayModeSpecsChangedLocked`, and on Android 15
+  `requestDisplayModes(IBinder, int, int[])`
+- `DisplayManagerService.requestDisplayPower(int, boolean)` — present on
+  Android 15, and the method LibreDeX reflects into
 
 **Commit**
 - `LocalDisplayAdapter$LocalDisplayDevice.setDesiredDisplayModeSpecsLocked`,

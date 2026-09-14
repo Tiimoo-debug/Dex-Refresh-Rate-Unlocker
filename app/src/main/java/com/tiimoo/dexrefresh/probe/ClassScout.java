@@ -54,12 +54,28 @@ public final class ClassScout {
             "com.android.server.display.VirtualDisplayAdapter",
             "com.android.server.display.DisplayPowerController",
             "com.android.server.display.DisplayPowerController2",
-            // --- mode selection: Android 14 layout ---
+            // --- mode selection: Android 14+ layout (.mode subpackage) ---
             "com.android.server.display.mode.DisplayModeDirector",
             "com.android.server.display.mode.DisplayModeDirector$DesiredDisplayModeSpecs",
             "com.android.server.display.mode.Vote",
             "com.android.server.display.mode.VotesStorage",
             "com.android.server.display.mode.SkinThermalStatusObserver",
+            // --- mode selection: Android 15 made Vote an interface with one
+            //     class per vote kind. Their presence tells us at a glance
+            //     which generation of the vote system this firmware runs.
+            "com.android.server.display.mode.RefreshRateVote",
+            "com.android.server.display.mode.RefreshRateVote$PhysicalVote",
+            "com.android.server.display.mode.RefreshRateVote$RenderVote",
+            "com.android.server.display.mode.SizeVote",
+            "com.android.server.display.mode.BaseModeRefreshRateVote",
+            "com.android.server.display.mode.DisableRefreshRateSwitchingVote",
+            "com.android.server.display.mode.SupportedModesVote",
+            "com.android.server.display.mode.SupportedRefreshRatesVote",
+            "com.android.server.display.mode.RequestedRefreshRateVote",
+            "com.android.server.display.mode.CombinedVote",
+            "com.android.server.display.mode.VoteSummary",
+            "com.android.server.display.mode.SyntheticModeManager",
+            "com.android.server.display.mode.SystemRequestObserver",
             // --- mode selection: pre-Android-14 layout ---
             "com.android.server.display.DisplayModeDirector",
             "com.android.server.display.DisplayModeDirector$Vote",

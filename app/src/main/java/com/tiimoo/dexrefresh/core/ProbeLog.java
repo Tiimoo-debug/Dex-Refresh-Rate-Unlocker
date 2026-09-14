@@ -40,7 +40,12 @@ public final class ProbeLog {
             return;
         }
         started = true;
-        Thread t = new Thread(ProbeLog::drainLoop, Cfg.TAG + "-log");
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                drainLoop();
+            }
+        }, Cfg.TAG + "-log");
         t.setDaemon(true);
         t.setPriority(Thread.MIN_PRIORITY);
         t.start();

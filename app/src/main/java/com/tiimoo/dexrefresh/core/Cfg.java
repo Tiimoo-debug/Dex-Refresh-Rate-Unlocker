@@ -42,8 +42,8 @@ public final class Cfg {
     public static final Pattern HOOKABLE_METHOD = Pattern.compile(
             // "displaymode" covers setDesiredDisplayModeSpecsLocked,
             // updateDisplayModesLocked and getUserPreferredDisplayModeInternal.
-            // "requestdisplaystate" is Android 14's name for what older notes
-            // (and LibreDeX) call requestDisplayPower.
+            // Android 15 has both requestDisplayPower (the method LibreDeX
+            // reflects into) and requestDisplayStateInternal, so match either.
             "(?i)displaymode|modespecs|refreshrate|framerate|activemode"
                     + "|requestdisplaystate|requestdisplaypower|modechanged"
                     + "|notifyhfr|hfrmode|vrrmode|peakrefresh|setmodeid"

@@ -54,7 +54,12 @@ public final class Throttle {
             SUPPRESSED.clear();
         }
         long now = System.currentTimeMillis();
-        long[] bucket = BUCKETS.computeIfAbsent(key, k -> new long[]{now, 0L});
+        long[] bucket = BUCKETS.get(key);
+        if (bucket == null) {
+            long[] created = new long[]{now, 0L};
+            long[] raced = BUCKETS.putIfAbsent(key, created);
+            bucket = raced != null ? raced : created;
+        }
         synchronized (bucket) {
             if (now - bucket[0] >= windowMs) {
                 bucket[0] = now;
@@ -69,7 +74,13 @@ public final class Throttle {
                 return true;
             }
         }
-        SUPPRESSED.computeIfAbsent(key, k -> new AtomicLong()).incrementAndGet();
+        AtomicLong counter = SUPPRESSED.get(key);
+        if (counter == null) {
+            AtomicLong created = new AtomicLong();
+            AtomicLong raced = SUPPRESSED.putIfAbsent(key, created);
+            counter = raced != null ? raced : created;
+        }
+        counter.incrementAndGet();
         return false;
     }
 

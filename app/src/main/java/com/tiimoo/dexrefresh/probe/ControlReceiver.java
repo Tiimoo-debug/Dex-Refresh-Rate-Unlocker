@@ -96,7 +96,12 @@ public final class ControlReceiver extends BroadcastReceiver {
             if (Cfg.ACTION_SCOUT.equals(action)) {
                 final String className = stringExtra(intent, "class", null);
                 final boolean scan = boolExtra(intent, "scan", true);
-                Snapshots.runLater(0, () -> runScout(className, scan));
+                Snapshots.runLater(0, new Runnable() {
+                    @Override
+                    public void run() {
+                        runScout(className, scan);
+                    }
+                });
                 return;
             }
             // A DeX-ish broadcast we were guessing about actually fired.

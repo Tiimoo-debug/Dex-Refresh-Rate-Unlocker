@@ -8,6 +8,7 @@ import com.tiimoo.dexrefresh.core.Throttle;
 
 import java.util.regex.Pattern;
 
+import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
@@ -58,26 +59,29 @@ public final class DexAppHooks {
      */
     private static void hookWindowAttributes(ClassLoader cl) {
         HookEngine.hookNamed(cl, "android.view.ViewRootImpl", "setView", false,
-                (site, param) -> {
-                    if (param.args == null || param.args.length < 2) {
-                        return;
-                    }
-                    Object lp = param.args[1];
-                    if (lp == null) {
-                        return;
-                    }
-                    String summary = "preferredDisplayModeId="
-                            + Reflect.get(lp, "preferredDisplayModeId")
-                            + " preferredRefreshRate="
-                            + Reflect.get(lp, "preferredRefreshRate")
-                            + " preferredMinDisplayRefreshRate="
-                            + Reflect.get(lp, "preferredMinDisplayRefreshRate")
-                            + " preferredMaxDisplayRefreshRate="
-                            + Reflect.get(lp, "preferredMaxDisplayRefreshRate")
-                            + " title=" + Dumper.describe(Reflect.get(lp, "mTitle"), true);
-                    if (Throttle.changed("window-attrs", summary)
-                            && Throttle.allow("window-attrs", 30, Cfg.RATE_LIMIT_WINDOW_MS)) {
-                        ProbeLog.post("WINDOW %s", summary);
+                new HookEngine.OnCall() {
+                    @Override
+                    public void onCall(String site, XC_MethodHook.MethodHookParam param) {
+                        if (param.args == null || param.args.length < 2) {
+                            return;
+                        }
+                        Object lp = param.args[1];
+                        if (lp == null) {
+                            return;
+                        }
+                        String summary = "preferredDisplayModeId="
+                                + Reflect.get(lp, "preferredDisplayModeId")
+                                + " preferredRefreshRate="
+                                + Reflect.get(lp, "preferredRefreshRate")
+                                + " preferredMinDisplayRefreshRate="
+                                + Reflect.get(lp, "preferredMinDisplayRefreshRate")
+                                + " preferredMaxDisplayRefreshRate="
+                                + Reflect.get(lp, "preferredMaxDisplayRefreshRate")
+                                + " title=" + Dumper.describe(Reflect.get(lp, "mTitle"), true);
+                        if (Throttle.changed("window-attrs", summary)
+                                && Throttle.allow("window-attrs", 30, Cfg.RATE_LIMIT_WINDOW_MS)) {
+                            ProbeLog.post("WINDOW %s", summary);
+                        }
                     }
                 });
     }

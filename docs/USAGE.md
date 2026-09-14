@@ -24,7 +24,8 @@ anything else:
 - **the `SurfaceControl` method inventory** — this is where a Samsung-specific
   refresh-rate entry point would show up
 - **the class presence report** — which of the classes we guessed at actually
-  exist on One UI 7
+  exist on One UI 7, including which generation of the vote system it runs
+  (Android 15 splits `Vote` into one class per vote kind)
 
 ## 1. Baseline snapshot (no DeX)
 

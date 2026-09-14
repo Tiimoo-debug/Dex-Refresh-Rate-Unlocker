@@ -143,19 +143,30 @@ public final class DisplayHooks {
     // ------------------------------------------------------------------
 
     private static void captureServiceInstances(ClassLoader cl) {
-        captureCtor(cl, DMS, "DisplayManagerService", obj -> {
-            ProbeState.displayManagerService = obj;
-            ProbeState.systemContext = Reflect.get(obj, "mContext");
+        captureCtor(cl, DMS, "DisplayManagerService", new Capture() {
+            @Override
+            public void accept(Object instance) {
+                ProbeState.displayManagerService = instance;
+                ProbeState.systemContext = Reflect.get(instance, "mContext");
+            }
         });
         for (String dmd : DMD_NAMES) {
             if (Reflect.cls(cl, dmd) != null) {
-                captureCtor(cl, dmd, "DisplayModeDirector",
-                        obj -> ProbeState.displayModeDirector = obj);
+                captureCtor(cl, dmd, "DisplayModeDirector", new Capture() {
+                    @Override
+                    public void accept(Object instance) {
+                        ProbeState.displayModeDirector = instance;
+                    }
+                });
                 break;
             }
         }
-        captureCtor(cl, LOGICAL_DISPLAY_MAPPER, "LogicalDisplayMapper",
-                obj -> ProbeState.logicalDisplayMapper = obj);
+        captureCtor(cl, LOGICAL_DISPLAY_MAPPER, "LogicalDisplayMapper", new Capture() {
+            @Override
+            public void accept(Object instance) {
+                ProbeState.logicalDisplayMapper = instance;
+            }
+        });
     }
 
     private interface Capture {
@@ -242,9 +253,12 @@ public final class DisplayHooks {
         }
         // Everything below touches binder / ContentResolver, so it must not run
         // on this thread: onBootPhase is called with server locks in play.
-        Snapshots.runLater(0, () -> {
-            ControlReceiver.register(ProbeState.systemContext);
-            Snapshots.take("boot-baseline", Cfg.SNAPSHOT_DEPTH, false);
+        Snapshots.runLater(0, new Runnable() {
+            @Override
+            public void run() {
+                ControlReceiver.register(ProbeState.systemContext);
+                Snapshots.take("boot-baseline", Cfg.SNAPSHOT_DEPTH, false);
+            }
         });
     }
 
@@ -255,12 +269,17 @@ public final class DisplayHooks {
     /**
      * Hook vote storage.
      *
-     * <p>In Android 14 every constraint on the allowed refresh-rate range is
-     * expressed as a {@code Vote} filed under a priority, and the winning range
-     * is the intersection of the votes. So whatever drops the panel to 60 Hz
-     * under DeX has to show up here as a vote appearing or changing. Logging
-     * only the transitions turns this into a direct answer to "what filtered out
-     * the higher rates, and when".
+     * <p>On Android 14 and 15 alike, every constraint on the allowed
+     * refresh-rate range is expressed as a {@code Vote} filed under a priority,
+     * and the winning range is the intersection of the votes. So whatever drops
+     * the panel to 60 Hz under DeX has to show up here as a vote appearing or
+     * changing. Logging only the transitions turns this into a direct answer to
+     * "what filtered out the higher rates, and when".
+     *
+     * <p>Android 15 (this device) turned {@code Vote} from a concrete class
+     * into an interface with one implementation per kind - SizeVote,
+     * SupportedModesVote, RefreshRateVote$PhysicalVote and so on - so the class
+     * name in the log already tells you what kind of restriction a vote is.
      */
     private static void hookVotes(ClassLoader cl) {
         Class<?> storage = Reflect.firstClass(cl, VOTES_STORAGE_NAMES);

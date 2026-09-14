@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,11 +40,14 @@ public final class Snapshots {
     }
 
     private static final ScheduledExecutorService EXEC =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, Cfg.TAG + "-snap");
-                t.setDaemon(true);
-                t.setPriority(Thread.MIN_PRIORITY);
-                return t;
+            Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, Cfg.TAG + "-snap");
+                    t.setDaemon(true);
+                    t.setPriority(Thread.MIN_PRIORITY);
+                    return t;
+                }
             });
 
     private static final AtomicInteger COUNTER = new AtomicInteger();
@@ -53,11 +57,15 @@ public final class Snapshots {
     /** Run work off the hook thread. */
     public static void runLater(long delayMs, Runnable r) {
         try {
-            EXEC.schedule(() -> {
-                try {
-                    r.run();
-                } catch (Throwable t) {
-                    ProbeLog.postThrowable("snapshot task", t);
+            final Runnable work = r;
+            EXEC.schedule(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        work.run();
+                    } catch (Throwable t) {
+                        ProbeLog.postThrowable("snapshot task", t);
+                    }
                 }
             }, Math.max(0, delayMs), TimeUnit.MILLISECONDS);
         } catch (Throwable t) {
@@ -80,16 +88,25 @@ public final class Snapshots {
         if (!DEFERRED_PENDING.compareAndSet(false, true)) {
             return;
         }
-        runLater(Cfg.SNAPSHOT_SETTLE_MS, () -> {
-            DEFERRED_PENDING.set(false);
-            lastAutoSnapshotMs = System.currentTimeMillis();
-            take(label, Cfg.SNAPSHOT_DEPTH, false);
+        final String snapshotLabel = label;
+        runLater(Cfg.SNAPSHOT_SETTLE_MS, new Runnable() {
+            @Override
+            public void run() {
+                DEFERRED_PENDING.set(false);
+                lastAutoSnapshotMs = System.currentTimeMillis();
+                take(snapshotLabel, Cfg.SNAPSHOT_DEPTH, false);
+            }
         });
     }
 
     /** Take a snapshot on the snapshot thread. */
     public static void request(final String label, final int depth, final boolean callGetters) {
-        runLater(0, () -> take(label, depth, callGetters));
+        runLater(0, new Runnable() {
+            @Override
+            public void run() {
+                take(label, depth, callGetters);
+            }
+        });
     }
 
     /**
@@ -112,10 +129,30 @@ public final class Snapshots {
             sb.append("[dex-hints] failed: ").append(t).append('\n');
         }
 
-        section(sb, "displays", () -> dumpDisplays(depth));
-        section(sb, "votes", () -> dumpVotes(depth));
-        section(sb, "mode-director", () -> dumpModeDirector(depth, callGetters));
-        section(sb, "last-observed", Snapshots::dumpLastSeen);
+        section(sb, "displays", new Section() {
+            @Override
+            public String render() {
+                return dumpDisplays(depth);
+            }
+        });
+        section(sb, "votes", new Section() {
+            @Override
+            public String render() {
+                return dumpVotes(depth);
+            }
+        });
+        section(sb, "mode-director", new Section() {
+            @Override
+            public String render() {
+                return dumpModeDirector(depth, callGetters);
+            }
+        });
+        section(sb, "last-observed", new Section() {
+            @Override
+            public String render() {
+                return dumpLastSeen();
+            }
+        });
 
         sb.append("========== END SNAPSHOT #").append(n).append(" ==========");
         ProbeLog.postBlock(sb.toString());
