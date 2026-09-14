@@ -32,6 +32,24 @@ public final class Diagnose {
 
     private static final int GLOBAL_ID = -1;
 
+    /**
+     * Explain every live display.
+     *
+     * <p>The no-argument form exists because display ids churn - the HDMI
+     * monitor has been 6, 7, 8 and 9 in one session - so requiring an id up
+     * front means looking one up first and often guessing wrong.
+     */
+    public static void explainAll() {
+        int[] ids = Snapshots.knownDisplayIds();
+        if (ids.length == 0) {
+            ProbeLog.post("no displays known yet; wait for a STATE line");
+            return;
+        }
+        for (int id : ids) {
+            explain(id);
+        }
+    }
+
     public static void explain(int displayId) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n===== why is display ").append(displayId)

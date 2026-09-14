@@ -8,7 +8,7 @@
 #   ./dex-probe.sh watch                follow the probe log
 #   ./dex-probe.sh save [file]          dump the log buffer to a file
 #   ./dex-probe.sh bigbuffer            raise the logcat buffer to 64M
-#   ./dex-probe.sh why <displayId>      list every vote capping that display
+#   ./dex-probe.sh why [displayId]      list every vote capping each display
 #   ./dex-probe.sh unlock <spec|off>    drop capping votes this session
 #   ./dex-probe.sh persist <spec>       same, applied at every boot
 #
@@ -54,12 +54,9 @@ case "$cmd" in
         echo "signature dump of $2 requested"
         ;;
     why)
-        if [ $# -lt 2 ]; then
-            echo "usage: $0 why <displayId>" >&2
-            exit 2
-        fi
-        setprop "$PROP" "why $2 $(date +%s)"
-        echo "asking what caps display $2"
+        # No id needed: display ids churn, so the default explains them all.
+        setprop "$PROP" "why ${2:-} $(date +%s)"
+        echo "asking what caps ${2:+display $2}${2:-every display}; watch the log"
         ;;
     unlock)
         if [ $# -lt 2 ]; then

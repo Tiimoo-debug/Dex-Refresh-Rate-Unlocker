@@ -23,7 +23,7 @@ import java.util.Locale;
  *   su -c 'setprop debug.dexrr.cmd "votes"'
  *   su -c 'setprop debug.dexrr.cmd "scout"'
  *   su -c 'setprop debug.dexrr.cmd "class com.android.server.display.mode.Vote"'
- *   su -c 'setprop debug.dexrr.cmd "why 9"'            what caps display 9
+ *   su -c 'setprop debug.dexrr.cmd "why"'              what caps each display
  *   su -c 'setprop debug.dexrr.cmd "unlock -1:19"'     drop a capping vote
  *   su -c 'setprop debug.dexrr.cmd "unlock off"'
  * </pre>
@@ -115,18 +115,28 @@ public final class CommandPoller {
             Snapshots.request(parts.length > 1 ? parts[1] : "votes-only", 2, false);
             return;
         }
-        if ("why".equals(verb) && parts.length > 1) {
-            try {
-                final int displayId = Integer.parseInt(parts[1]);
-                Snapshots.runLater(0, new Runnable() {
-                    @Override
-                    public void run() {
-                        Diagnose.explain(displayId);
-                    }
-                });
-            } catch (NumberFormatException e) {
-                ProbeLog.post("why: '%s' is not a display id", parts[1]);
+        if ("why".equals(verb)) {
+            Integer requested = null;
+            if (parts.length > 1) {
+                try {
+                    requested = Integer.valueOf(Integer.parseInt(parts[1]));
+                } catch (NumberFormatException e) {
+                    // "why <timestamp>" or a typo: explain everything instead of
+                    // failing, since the id is the awkward part to get right.
+                    requested = null;
+                }
             }
+            final Integer displayId = requested;
+            Snapshots.runLater(0, new Runnable() {
+                @Override
+                public void run() {
+                    if (displayId == null) {
+                        Diagnose.explainAll();
+                    } else {
+                        Diagnose.explain(displayId.intValue());
+                    }
+                }
+            });
             return;
         }
         if ("unlock".equals(verb)) {
@@ -159,7 +169,7 @@ public final class CommandPoller {
             return;
         }
         ProbeLog.post("unknown command '%s' (try: snapshot <label> | votes | scout"
-                + " | class <fqcn> | why <displayId>"
+                + " | class <fqcn> | why [displayId]"
                 + " | unlock <display:priority,...> | unlock off)", value);
     }
 
