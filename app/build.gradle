@@ -15,9 +15,31 @@ android {
         versionName '0.1.0-probe'
     }
 
+    signingConfigs {
+        debug {
+            // A keystore committed to the repo, rather than Gradle's per-machine
+            // ~/.android/debug.keystore. CI runs on a fresh machine every time,
+            // so that default generated a NEW key for every build: each APK was
+            // signed by a different key, every install over the previous one
+            // failed with a signature mismatch, and the module had to be
+            // uninstalled, reinstalled, re-enabled and re-scoped in LSPosed on
+            // every single build. With a fixed key, builds install over the top
+            // and LSPosed keeps its settings.
+            //
+            // This is a debug key with the standard published password. It
+            // proves nothing about who built the APK and is not used for
+            // anything that needs a real signature.
+            storeFile file('probe-debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         debug {
             minifyEnabled false
+            signingConfig signingConfigs.debug
         }
         release {
             minifyEnabled false
