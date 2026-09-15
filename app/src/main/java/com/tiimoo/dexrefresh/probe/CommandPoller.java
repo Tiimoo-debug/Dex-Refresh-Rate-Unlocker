@@ -141,6 +141,15 @@ public final class CommandPoller {
             });
             return;
         }
+        if ("usb".equals(verb)) {
+            Snapshots.runLater(0, new Runnable() {
+                @Override
+                public void run() {
+                    UsbLink.report();
+                }
+            });
+            return;
+        }
         if ("capture".equals(verb)) {
             final String label = parts.length > 1 ? parts[1] : "cap" + System.currentTimeMillis();
             Snapshots.runLater(0, new Runnable() {

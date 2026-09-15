@@ -201,6 +201,46 @@ the answer is only in the log.
 `persist.dexrr.unlock` is polled, not only read at boot, so setting it takes
 effect within a couple of seconds rather than at the next reboot.
 
+## 5a. Is it the cable? (`usb`)
+
+Before blaming a vote, rule out the link. A USB-C port has four high-speed
+lanes and splits them between DisplayPort and USB 3:
+
+| pin assignment | DP lanes | USB 3.x |
+| --- | --- | --- |
+| C / E | 4 | no (USB 2 only) |
+| D / F | 2 | yes |
+
+A dock offering ethernet and storage needs USB 3, so it negotiates two lanes
+and DisplayPort loses half its bandwidth. When that happens **the high modes
+are simply absent from the display's mode list and no vote is responsible** —
+which looks exactly like a cap, and isn't one.
+
+```sh
+su -c 'setprop debug.dexrr.cmd "usb $(date +%s)"'
+su -c 'logcat -d -s DexRRReport:V'
+```
+
+```
+   power role:     SINK (the phone is being powered)
+   power limited:  true   <- the phone is capping what it will source
+   DP lanes:       2   <- HALF bandwidth. The link kept USB 3 for the
+                      dock's other devices and gave DisplayPort
+                      two lanes instead of four.
+   link training:  success
+```
+
+Four lanes clears the link of blame and the limit is in the vote table. Two
+lanes means it is the cable's allocation, and nothing this module drops will
+bring back a mode the link cannot carry.
+
+The power fields answer a *different* question — whether the phone is sourcing
+power to the display, and whether it is limiting that. Power rides VBUS and
+display data rides the high-speed lanes, so neither constrains the other; they
+are reported together only so they stay told apart.
+
+`dumpsys usb` shows the same fields without this module.
+
 ## 5b. Comparing before and after (`capture` / `diff`)
 
 Several things on this phone change the refresh rate — Samsung's own policy,

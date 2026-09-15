@@ -12,6 +12,7 @@ import com.tiimoo.dexrefresh.probe.Heartbeat;
 import com.tiimoo.dexrefresh.probe.ProbeState;
 import com.tiimoo.dexrefresh.probe.Snapshots;
 import com.tiimoo.dexrefresh.probe.Unlock;
+import com.tiimoo.dexrefresh.probe.UsbLink;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -61,6 +62,8 @@ public final class DisplayHooks {
             "com.android.server.display.LocalDisplayAdapter$LocalDisplayDevice";
     private static final String LOGICAL_DISPLAY_MAPPER =
             "com.android.server.display.LogicalDisplayMapper";
+    /** com.android.server.usb.UsbPortManager - the link, not the display. */
+    private static final String USB_PORT_MANAGER = "com.android.server.usb.UsbPortManager";
     private static final String SURFACE_CONTROL = "android.view.SurfaceControl";
     private static final String DISPLAY_MODE = "android.view.Display$Mode";
 
@@ -239,6 +242,15 @@ public final class DisplayHooks {
             @Override
             public void accept(Object instance) {
                 ProbeState.logicalDisplayMapper = instance;
+            }
+        });
+        // Not a display service, but it holds the one number that decides
+        // whether a high rate is reachable over this cable at all: how many of
+        // the port's four lanes DisplayPort got. See UsbLink.
+        captureCtor(cl, USB_PORT_MANAGER, "UsbPortManager", new Capture() {
+            @Override
+            public void accept(Object instance) {
+                UsbLink.portManager = instance;
             }
         });
     }

@@ -871,3 +871,59 @@ before anything is built:
 `why` now distinguishes them, so this is a measurement rather than a guess.
 Chasing (2) before reading the "content produced at" line would be building
 against an unverified premise, which this project has already done once.
+
+## The monitor no longer runs off the phone. Is that bandwidth?
+
+On One UI 5.1 the S22 Ultra powered the monitor with no charger attached. On
+One UI 7 it does not, and the monitor needs its own supply.
+
+That is a real change and worth recording, but it is **not** evidence of a
+bandwidth cap, because power and data do not share a path on USB-C:
+
+- **power** rides VBUS, a dedicated pair of pins, and its ceiling is a current
+  and voltage the two ends agree on
+- **display data** rides the high-speed lanes, and its ceiling is how many of
+  those four lanes DisplayPort got
+
+Sourcing less current does not take a lane away, and giving DisplayPort four
+lanes does not change what VBUS will carry. A phone can power a monitor over
+two lanes or refuse to power one over four.
+
+### What it does point at, which is worth something
+
+Both outcomes are decided in the *same* Type-C/PD exchange with the same
+partner: power role, current limits, alt-mode entry and pin assignment are all
+negotiated there, by the same policy. So the observation is direct evidence
+that **Samsung's USB-C policy changed between One UI 5.1 and One UI 7** — and
+pin assignment is decided by that policy. It does not show a bandwidth cap; it
+shows the layer worth suspecting is the one below the framework, which is the
+same conclusion the lane split already pointed to.
+
+Plausible causes for the power half specifically, none confirmed: a lower
+source-current ceiling, a thermal or battery-level condition on sourcing, or a
+changed preference in the power-role negotiation so the phone no longer takes
+the source role against a partner that can also source.
+
+### Both halves are now readable rather than inferred
+
+Android 14 added `DisplayPortAltModeInfo`, and `UsbPortStatus` carries the
+power fields, so `UsbPortManager` can be read for the answer instead of
+reasoning about it:
+
+| field | answers |
+| --- | --- |
+| `mNumLanes` | 2 or 4 — the actual lane split for this cable |
+| `mPowerTransferLimited` | whether the phone is capping what it will source |
+| `mCurrentPowerRole` | SOURCE or SINK — which end is powering which |
+| `mLinkTrainingStatus` | whether the link came up and then failed to train |
+
+The `usb` command (and a button) reports all of it. It is read-only field
+access through the captured `UsbPortManager`, the same method as everything
+else here, and it changes nothing.
+
+This matters to the core question and not only to the dock: **two lanes removes
+the high modes from the display's mode list, with no vote responsible.** That
+is the one failure this module could not previously distinguish from a cap, and
+it would have sent the analysis hunting for a vote that was never there.
+
+`dumpsys usb` shows the same fields without this module, if a shell is handier.

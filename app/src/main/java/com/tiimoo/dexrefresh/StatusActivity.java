@@ -155,6 +155,22 @@ public class StatusActivity extends Activity {
             }
         }));
 
+        root.addView(heading("The cable itself"));
+        root.addView(body("A USB-C port splits four high-speed lanes between "
+                + "DisplayPort and USB 3. A dock that wants ethernet and "
+                + "storage takes two of them, leaving DisplayPort half its "
+                + "bandwidth \u2014 and then the high modes are missing from "
+                + "the list with no vote responsible. This reads what the link "
+                + "actually negotiated, so that case stops looking like a cap."));
+        root.addView(button("Show USB-C link (lanes, power role)",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        runThenShowReport("setprop " + Cfg.PROP_CMD
+                                + " \"usb " + stamp() + "\"");
+                    }
+                }));
+
         root.addView(heading("Compare before and after"));
         root.addView(body("Several things on this phone change the refresh "
                 + "rate and none of them have been told apart: Samsung's own "
