@@ -168,6 +168,12 @@ public final class Unlock {
         if (DROPPED.isEmpty()) {
             return false;
         }
+        // Our own pin is never suppressed, however wide the spec. A "*:20"
+        // would otherwise delete the vote the user explicitly asked for, and
+        // the symptom - the pin quietly not taking - gives no hint why.
+        if (Pin.isOurs(displayId, priority)) {
+            return false;
+        }
         // "*" matters because display ids are not stable: the HDMI screen was
         // observed moving 6 -> 7 -> 8 -> 9 inside a single session, since the
         // display is re-created on every mode change. A rule pinned to one id

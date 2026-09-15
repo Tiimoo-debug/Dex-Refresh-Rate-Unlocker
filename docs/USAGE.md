@@ -201,6 +201,47 @@ the answer is only in the log.
 `persist.dexrr.unlock` is polled, not only read at boot, so setting it takes
 effect within a couple of seconds rather than at the next reboot.
 
+## 5. Picking an exact mode (`modes` / `pin`)
+
+`unlock auto` means "as fast as it goes". When the trade matters — 144 Hz at
+1080p against 120 Hz at 1440p, say — list what the display advertises and
+choose:
+
+```sh
+su -c 'setprop debug.dexrr.cmd "modes $(date +%s)"'
+su -c 'logcat -d -s DexRRReport:V'
+```
+
+```
+display 9  (HDMI Screen)
+  MODE d9 id=87   1920x1080 @     144 Hz
+  MODE d9 id=46   2560x1440 @     120 Hz   <- active now
+  MODE d9 id=88   2560x1440 @      60 Hz
+  MODE d9 id=44   1920x1080 @      60 Hz
+```
+
+```sh
+su -c 'setprop debug.dexrr.cmd "pin 9 87 $(date +%s)"'
+su -c 'setprop debug.dexrr.cmd "pin off $(date +%s)"'
+```
+
+A pin survives reboots (`persist.dexrr.pin`). In the app it is **Load the mode
+list**, which turns the report into one button per mode, then **Unpin** to go
+back to automatic.
+
+Two things to know:
+
+- **A pin narrows, it never widens.** Asking for a mode faster than a surviving
+  cap allows leaves the cap in charge. The pin report checks and tells you
+  when something else is still in the way — run `unlock auto` first in that
+  case.
+- **This is not EDID editing.** The list is the modes the framework derived
+  from the display's EDID and the link it came up on. A resolution and rate
+  pair that is absent was either never advertised or cannot be carried, and no
+  vote brings it back.
+
+`unlock auto` will not undo a pin, and neither will any `unlock` spec.
+
 ## 5a. Is it the cable? (`usb`)
 
 Before blaming a vote, rule out the link. A USB-C port has four high-speed

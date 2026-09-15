@@ -49,6 +49,9 @@ public final class Cfg {
      */
     public static final String PROP_PERSIST_UNLOCK = "persist.dexrr.unlock";
 
+    /** A pinned mode, as "<displayId> <modeId>", surviving reboots. */
+    public static final String PROP_PERSIST_PIN = "persist.dexrr.pin";
+
     /**
      * Compact live state, published by the module for the control panel to read.
      *

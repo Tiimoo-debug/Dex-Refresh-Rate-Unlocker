@@ -41,6 +41,7 @@ public final class CommandPoller {
     private static volatile boolean started;
     private static volatile String lastValue;
     private static volatile String lastPersisted;
+    private static volatile String lastPin;
 
     public static synchronized void start(final ClassLoader cl) {
         if (started) {
@@ -88,6 +89,13 @@ public final class CommandPoller {
                 if (!persistedValue.equals(lastPersisted)) {
                     lastPersisted = persistedValue;
                     Unlock.applyPersisted(persistedValue);
+                }
+                Object pinned = get.invoke(null, Cfg.PROP_PERSIST_PIN, "");
+                String pinnedValue = pinned instanceof String
+                        ? ((String) pinned).trim() : "";
+                if (!pinnedValue.equals(lastPin)) {
+                    lastPin = pinnedValue;
+                    Pin.applyPersisted(pinnedValue);
                 }
             } catch (Throwable t) {
                 // Never let the poller die; a transient failure is not fatal.
@@ -137,6 +145,28 @@ public final class CommandPoller {
                     } else {
                         Diagnose.explain(displayId.intValue());
                     }
+                }
+            });
+            return;
+        }
+        if ("modes".equals(verb)) {
+            Snapshots.runLater(0, new Runnable() {
+                @Override
+                public void run() {
+                    Modes.report();
+                }
+            });
+            return;
+        }
+        if ("pin".equals(verb)) {
+            // Joined from the stripped parts, never sliced out of the raw
+            // value - that still carries the cache-busting timestamp, which is
+            // exactly the class of bug that made "why" read display 1789418903.
+            final String spec = join(parts, 1);
+            Snapshots.runLater(0, new Runnable() {
+                @Override
+                public void run() {
+                    Pin.configure(spec);
                 }
             });
             return;
@@ -263,5 +293,17 @@ public final class CommandPoller {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** parts[from..] rejoined with single spaces; "off" when there are none. */
+    private static String join(String[] parts, int from) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < parts.length; i++) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(parts[i]);
+        }
+        return sb.length() == 0 ? "off" : sb.toString();
     }
 }

@@ -927,3 +927,90 @@ is the one failure this module could not previously distinguish from a cap, and
 it would have sent the analysis hunting for a vote that was never there.
 
 `dumpsys usb` shows the same fields without this module, if a shell is handier.
+
+## Picking a mode, rather than accepting the fastest one
+
+`auto` answers "as fast as it goes". That is one question, and not always the
+one being asked: a monitor that does 144 Hz at 1920x1080 and 120 at 2560x1440
+poses a real trade, and only the person looking at the screen can settle it.
+
+So the module can now file a vote as well as remove one. That is a genuine
+change in kind — everything before this only ever took votes away — and it is
+unavoidable, because "run at exactly 1920x1080 at 144" cannot be expressed by
+removing anything. The framework picks the best mode every surviving vote
+permits, and "best" is its opinion.
+
+### How
+
+`Vote.forSupportedModes(List<Integer>)` narrows the summary's mode set by
+`retainAll`, so a vote naming exactly one id leaves the framework one choice.
+It is filed together with `Vote.forBaseModeRefreshRate(rate)`, both wrapped in
+one `CombinedVote` so the pair occupies a single priority slot — the same shape
+Samsung's own p19 DeX vote uses.
+
+Filed at priority 20, which is `MAX_PRIORITY`. Votes are applied from the top
+down, and when the surviving set comes out empty the director retries having
+discarded the lowest priorities first; a pin filed low would be the first thing
+dropped in exactly the case where it matters. `VotesStorage.updateVote` rejects
+anything outside 0–20 outright, so 20 is the ceiling and not a guess.
+
+On AOSP 15, priority 20 is UDFPS — the fingerprint reader, which concerns the
+built-in panel only, so on an external display the slot is free in practice.
+Pinning display 0 does overwrite it, and the report says so rather than doing
+it quietly.
+
+### What a pin cannot do
+
+A pin narrows and never widens. Asking for a mode faster than a surviving cap
+allows leaves the cap in charge and the pin does nothing — so a pin above the
+current ceiling needs `unlock` as well. Rather than let that be discovered by
+waiting, the pin report checks the other blocking priorities and says up front
+whether anything is still in the way.
+
+And this is not EDID editing. What the menu lists is the modes the framework
+derived from the display's EDID and the link it came up on. If a resolution and
+rate pair is absent, either the display never advertised it or the link cannot
+carry it — and no vote changes that. Injecting modes that were never offered is
+a different and much riskier exercise, at the display-device layer rather than
+the vote layer, and nothing here attempts it.
+
+### Two guards
+
+- **`auto` never proposes dropping our own pin.** Without that, the mode-pin
+  detection added earlier would see a pin to a non-maximum mode, correctly
+  identify it as "a vote pinning the display away from its fastest mode", and
+  undo the user's explicit choice.
+- **`unlock` never suppresses it either.** A spec of `*:20` would otherwise
+  delete the vote the user just asked for, and the symptom — a pin that quietly
+  does not take — gives no hint why.
+
+## The AOSP 15 priority table, against what this device shows
+
+The priority constants are gone from Samsung's R8'd framework, but they are
+compile-time constants in AOSP 15, so they can be read from a stock
+`android-all` jar:
+
+| # | AOSP 15 name |
+| --- | --- |
+| 5 | `APP_REQUEST_RENDER_FRAME_RATE_RANGE` |
+| 10 | `SYNCHRONIZED_REFRESH_RATE` |
+| 11 | `LIMIT_MODE` |
+| 13 | `LAYOUT_LIMITED_FRAME_RATE` |
+| 19 | `PROXIMITY` |
+| 20 | `UDFPS` (= `MAX_PRIORITY`) |
+
+Lining that up against what this phone actually files is suggestive:
+
+| observed | AOSP name at that number | fit |
+| --- | --- | --- |
+| `p5 = RenderVote(120, inf)` | app request render range | an app asking for ≥120 — consistent with it being another module's |
+| `d9:10 = PhysicalVote(0,120)` | synchronized refresh rate | matching two displays to each other is exactly DeX's situation |
+| `d-1:11 = PhysicalVote(10,120)` | limit mode | a global ceiling, which is what it is |
+| `d9:13 = RenderVote(0,120)` | layout limited frame rate | plausible |
+| `d-1:19 = PhysicalVote(0,60)` | proximity | **does not fit** |
+
+Four of five read naturally. The fifth does not, and it is the important one —
+nothing about proximity sensing explains a global 60 Hz DeX cap. Samsung adds
+its own priorities and R8 has renumbered nothing visibly, but this table is
+AOSP's and this firmware is not AOSP, so the mapping is a lead and not a
+finding. The `trace` command settles any individual row by naming the caller.

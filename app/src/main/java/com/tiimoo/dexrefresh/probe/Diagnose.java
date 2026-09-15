@@ -172,6 +172,9 @@ public final class Diagnose {
             return;
         }
         for (int i = 0; i < votes.size(); i++) {
+            if (Pin.isOurs(displayId, votes.keyAt(i))) {
+                continue;
+            }
             if (Votes.capsBelow(votes.valueAt(i), maxRate)) {
                 out.add(Integer.valueOf(votes.keyAt(i)));
             }
@@ -216,6 +219,11 @@ public final class Diagnose {
             return;
         }
         for (int i = 0; i < votes.size(); i++) {
+            // Never propose dropping our own pin: the user asked for that mode,
+            // and "auto" deciding it knows better would silently undo them.
+            if (Pin.isOurs(displayId, votes.keyAt(i))) {
+                continue;
+            }
             List<?> ids = Votes.pinnedModeIds(votes.valueAt(i));
             if (ids != null && !contains(ids, maxId)) {
                 out.add(Integer.valueOf(votes.keyAt(i)));

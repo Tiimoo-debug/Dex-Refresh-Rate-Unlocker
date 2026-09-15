@@ -41,6 +41,7 @@ public class StatusActivity extends Activity {
     private TextView status;
     private TextView output;
     private EditText customSpec;
+    private LinearLayout modeList;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -152,6 +153,30 @@ public class StatusActivity extends Activity {
             @Override
             public void onClick(View v) {
                 showReport();
+            }
+        }));
+
+        root.addView(heading("Pick a mode"));
+        root.addView(body("Auto answers one question \u2014 as fast as it goes "
+                + "\u2014 and that is not always the question. Load the list and "
+                + "tap any resolution and rate the display advertises to hold it "
+                + "there. These are the modes the framework read from the "
+                + "display's EDID and the link it came up on; nothing here can "
+                + "add one that was never offered."));
+        root.addView(button("Load the mode list", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                loadModes();
+            }
+        }));
+        modeList = new LinearLayout(this);
+        modeList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(modeList);
+        root.addView(button("Unpin (back to automatic choice)", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                run("setprop " + Cfg.PROP_CMD + " \"pin off " + stamp() + "\"",
+                        "Pin removed.");
             }
         }));
 
@@ -306,6 +331,84 @@ public class StatusActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * Ask the module for the mode list, then turn it into one button per mode.
+     *
+     * <p>The report carries a stable "MODE d<display> id=<id> <w>x<h> @ <rate>"
+     * line for exactly this: reading ids out of a log and retyping them is the
+     * step where a digit gets dropped.
+     */
+    private void loadModes() {
+        modeList.removeAllViews();
+        setOutput("Reading the mode list\u2026");
+        Root.run("setprop " + Cfg.PROP_CMD + " \"modes " + stamp() + "\"; sleep 4; "
+                        + "logcat -d -s " + Cfg.TAG_REPORT + ":V | tail -n 200",
+                new Root.Callback() {
+                    @Override
+                    public void onResult(boolean ok, String out) {
+                        setOutput(out.trim().isEmpty()
+                                ? "No mode list came back. Is a display connected, "
+                                        + "and the module loaded?"
+                                : out);
+                        buildModeButtons(out);
+                    }
+                });
+    }
+
+    private void buildModeButtons(String report) {
+        modeList.removeAllViews();
+        int found = 0;
+        String[] lines = report.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            final Mode mode = parseMode(lines[i]);
+            if (mode == null) {
+                continue;
+            }
+            found++;
+            modeList.addView(button(mode.label, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    runThenShowReport("setprop " + Cfg.PROP_CMD + " \"pin "
+                            + mode.displayId + " " + mode.id + " " + stamp() + "\"");
+                }
+            }));
+        }
+        if (found == 0) {
+            modeList.addView(body("No modes were listed. Connect a display, wait a "
+                    + "few seconds, and load the list again."));
+        }
+    }
+
+    private static final class Mode {
+        int displayId;
+        int id;
+        String label;
+    }
+
+    /** "  MODE d9 id=87   2560x1440 @     144 Hz   <- active now" */
+    private Mode parseMode(String line) {
+        int at = line.indexOf("MODE d");
+        if (at < 0) {
+            return null;
+        }
+        try {
+            String[] parts = line.substring(at).trim().split("\\s+");
+            // parts: MODE, d<display>, id=<id>, <w>x<h>, @, <rate>, Hz, ...
+            if (parts.length < 6 || !parts[2].startsWith("id=")) {
+                return null;
+            }
+            Mode mode = new Mode();
+            mode.displayId = Integer.parseInt(parts[1].substring(1));
+            mode.id = Integer.parseInt(parts[2].substring(3));
+            mode.label = parts[3] + "  @  " + parts[5] + " Hz"
+                    + (line.contains("active now") ? "   \u2022 running now" : "")
+                    + "\ndisplay " + mode.displayId + ", mode " + mode.id;
+            return mode;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private void runThenShowReport(String command) {
